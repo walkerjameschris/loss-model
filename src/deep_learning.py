@@ -4,16 +4,21 @@
 # Chris Walker
 
 import sys
+import yaml
 import torch
 import numpy as np
 import pandas as pd
 
+with open('src/dials.yaml', 'r') as file:
+  dials = yaml.safe_load(file)
+
 train = pd.read_csv('train')
 test = pd.read_csv('test')
 
+loss_rate = dials['torch_rate']
+n_epochs = dials['torch_epochs']
+n_hidden = dials['torch_hidden']
 target = 'gross_loss'
-n_epochs = 500
-loss_rate = 0.00001
 
 def to_tensor(x):
   
@@ -34,7 +39,7 @@ def to_disk(x, y, label):
     "population": label
   })
   
-  data.to_csv(f"{label}_pred", index=False)
+  data.to_csv(label, index=False)
 
 #### Convert to Tensors ####
 
@@ -53,13 +58,11 @@ _, n_predictors = X_train.shape
 
 # Define neural network with hidden layers
 model = torch.nn.Sequential(
-  torch.nn.Linear(n_predictors, 10),
-  torch.nn.Tanh(),
-  torch.nn.Linear(10, 10),
-  torch.nn.Tanh(),
-  torch.nn.Linear(10, 10),
-  torch.nn.Tanh(),
-  torch.nn.Linear(10, 1)
+  torch.nn.Linear(n_predictors, n_hidden),
+  torch.nn.ReLU(),
+  torch.nn.Linear(n_hidden, n_hidden),
+  torch.nn.ReLU(),
+  torch.nn.Linear(n_hidden, 1)
 )
 
 # MSE loss is common for regression
@@ -81,7 +84,6 @@ for epoch in range(n_epochs):
   loss.backward()
   optimizer.step()
   
-  # Put in evaluation mode
   model.eval()
 
 # Save out to disk

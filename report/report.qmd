@@ -466,16 +466,6 @@ specs$ols |>
 
 ```{r}
 performance |>
-  dplyr::relocate(
-    population,
-    model,
-    gini,
-    tmr
-  ) |>
-  dplyr::arrange(
-    population != "train",
-    desc(gini)
-  ) |>
   dplyr::mutate(
     population = make_nicenames(population),
     model = make_nicenames(model),

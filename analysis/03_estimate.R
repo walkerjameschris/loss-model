@@ -259,7 +259,7 @@ nn_mod <-
 
 nn <- evaluate(nn_mod, train_test)
 
-#### Deep Learning with Python + Torch ####
+#### Deep Learning with Python and Torch ####
 
 temp_files <-
   train_test |>
@@ -282,17 +282,15 @@ reticulate::py_run_file(
   here::here("src/deep_learning.py")
 )
 
-pred_files <- here::here(c("train_pred", "test_pred"))
-
-deep <-
+torch <-
   purrr::map(
-    pred_files,
+    temp_files,
     readr::read_csv
   ) |>
   dplyr::bind_rows() |>
   get_performance()
 
-fs::file_delete(c(temp_files, pred_files))
+fs::file_delete(temp_files)
 
 #### Merge Performance ####
 
@@ -301,10 +299,23 @@ tibble::lst(
   xgb,
   gam,
   nn,
-  deep
+  torch
 ) |>
   dplyr::bind_rows(
     .id = "model"
+  ) |>
+  dplyr::relocate(
+    population,
+    model,
+    gini,
+    tmr
+  ) |>
+  dplyr::arrange(
+    population != "train",
+    desc(gini)
+  ) |>
+  print(
+    n = Inf
   ) |>
   readr::write_csv(
     here::here("data/performance.csv")

@@ -241,7 +241,7 @@ make_nicenames <- function(x) {
     "ols" ~ "Linear Regression",
     "xgb" ~ "XGBoost",
     "nn" ~ "Neural Network",
-    "deep" ~ "Deep Learning",
+    "torch" ~ "Torch",
     
     # Performance columns
     "gini" ~ "Gini",
