@@ -1,0 +1,119 @@
+
+#### Data Preparation ####
+
+# Path to Freddie Mac loan level performance sample
+zip_loc: "/home/chris/Downloads/historical_data_2007.zip"
+
+# Names and types for origination file
+historical_data:
+  fico: "numeric"                                          
+  first_pay_dt: "character"
+  fthb: "character"
+  maturity_dt: "character"
+  msa: "numeric"
+  mi_percent: "numeric"
+  one_unit: "numeric"
+  occupancy: "character"
+  cltv: "numeric"
+  dti: "numeric"
+  upb: "numeric"
+  ltv: "numeric"
+  int_rt: "numeric"
+  channel: "character"
+  prepayment: "character"
+  product: "character"
+  state: "character"
+  property: "character"
+  zip_code: "character"
+  id: "character"
+  purpose: "character"
+  term: "numeric"
+  one_borrower: "numeric"
+  seller: "character"
+  servicer: "character"
+  conforming: "character"
+  harp_id: "character"
+  program: "character"
+  harp: "character"
+  property_valuation: "numeric"
+  interest_only: "character"
+  cancel_mi: "character"
+
+# Names and types for performance file
+historical_data_time:
+  id: "character"
+  month: "character"
+  current_upb: "numeric"
+  current_dlq: "character"
+  loan_age: "numeric"
+  mon_to_maturity: "numeric"
+  defect_date: "character"
+  mod_flag: "character"
+  zero_bal_code: "character"
+  zero_bal_dt: "character"
+  current_int_rt: "numeric"
+  deferred_upb: "numeric"
+  due_date_of_pmt: "character"
+  mi_recoveries: "numeric"
+  net_sale: "numeric"
+  non_mi_recoveries: "numeric"
+  expenses: "numeric"
+  legal_costs: "numeric"
+  maintenance_costs: "numeric"
+  taxes_insurance: "numeric"
+  misc_expenses: "numeric"
+  net_loss: "numeric"
+  modi_cost: "numeric"
+  step_mod_flag: "character"
+  deferred_pay: "character"
+  eltv: "numeric"
+  zero_bal_upb: "numeric"
+  delq_interest: "numeric"
+  delq_disaster: "character"
+  borro_assist: "character"
+  current_month_mod: "numeric"
+  interest_upb: "numeric"
+  
+# Cols to read from loss data
+loss_cols: [
+  "id", "zero_bal_code", "loss",
+  "zero_bal_upb", "net_sale",
+  "expenses", "delq_interest"
+]
+
+# Cols to read from orig data
+orig_cols: [
+  "id", "fico", "fthb", "one_unit",
+  "occupancy", "cltv", "dti", "upb", 
+  "property", "purpose", "term",
+  "one_borrower", "state"
+]
+
+#### Tuning Procedures ####
+
+# Number of resamples for stability
+n_stability: 25
+
+# XGB params
+tree_depth: [24, 12, 6]
+learn_rate: [0.1, 0.3]
+trees: [40, 20, 10]
+
+# Neural Net params
+epochs: [10, 15]
+hidden_units: [5, 10, 20]
+
+# Toggles for MARS and XGB tuning
+run_stable: FALSE
+run_mars: FALSE
+tune_xgb: FALSE
+tune_net: FALSE
+
+# Final XGB params
+xgb_depth: 6
+xgb_rate: 0.1
+xgb_rounds: 20
+
+# Final Neural Net params
+nn_epochs: 10
+nn_nodes: 5
