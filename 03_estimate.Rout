@@ -1,0 +1,1988 @@
+
+R version 4.3.1 (2023-06-16) -- "Beagle Scouts"
+Copyright (C) 2023 The R Foundation for Statistical Computing
+Platform: aarch64-unknown-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> #### Setup ####
+> 
+> # 03_estimate.R
+> # Chris Walker
+> 
+> # Estimates many variants of a loss model
+> 
+> library(xgboost)
+> library(readr)
+> library(dplyr)
+
+Attaching package: ‘dplyr’
+
+The following object is masked from ‘package:xgboost’:
+
+    slice
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+> library(h2o)
+
+----------------------------------------------------------------------
+
+Your next step is to start H2O:
+    > h2o.init()
+
+For H2O package documentation, ask for help:
+    > ??h2o
+
+After starting H2O, you can use the Web UI at http://localhost:54321
+For more information visit https://docs.h2o.ai
+
+----------------------------------------------------------------------
+
+
+Attaching package: ‘h2o’
+
+The following objects are masked from ‘package:stats’:
+
+    cor, sd, var
+
+The following objects are masked from ‘package:base’:
+
+    &&, %*%, %in%, ||, apply, as.factor, as.numeric, colnames,
+    colnames<-, ifelse, is.character, is.factor, is.numeric, log,
+    log10, log1p, log2, round, signif, trunc
+
+> library(mgcv)
+Loading required package: nlme
+
+Attaching package: ‘nlme’
+
+The following object is masked from ‘package:dplyr’:
+
+    collapse
+
+This is mgcv 1.9-0. For overview type 'help("mgcv-package")'.
+> library(agua)
+Loading required package: parsnip
+> library(tidymodels)
+── Attaching packages ────────────────────────────────────── tidymodels 1.1.1 ──
+✔ broom        1.0.5          ✔ rsample      1.2.0     
+✔ dials        1.2.1          ✔ tibble       3.2.1     
+✔ ggplot2      3.5.0          ✔ tidyr        1.3.1     
+✔ infer        1.0.6          ✔ tune         1.2.0.9000
+✔ modeldata    1.3.0          ✔ workflows    1.1.4     
+✔ purrr        1.0.2          ✔ workflowsets 1.0.1     
+✔ recipes      1.0.10         ✔ yardstick    1.3.0     
+── Conflicts ───────────────────────────────────────── tidymodels_conflicts() ──
+✖ nlme::collapse()             masks dplyr::collapse()
+✖ purrr::discard()             masks scales::discard()
+✖ dplyr::filter()              masks stats::filter()
+✖ dplyr::lag()                 masks stats::lag()
+✖ workflowsets::rank_results() masks agua::rank_results()
+✖ dplyr::slice()               masks xgboost::slice()
+✖ yardstick::spec()            masks readr::spec()
+✖ recipes::step()              masks stats::step()
+• Use suppressPackageStartupMessages() to eliminate package startup messages
+> 
+> source(here::here("src/functions.R"))
+> 
+> train_test <-
++   readr::read_rds(
++     here::here("data/train_test.Rds")
++   )
+> 
+> base_rec <-
++   readr::read_rds(
++     here::here("data/base_rec.Rds")
++   )
+> 
+> #### Assess Stability ####
+> 
+> lm_spec <- parsnip::linear_reg()
+> stable_wflow <- workflows::workflow(base_rec, lm_spec)
+> 
+> if (dials$run_stable) {
++   
++   rsample::bootstraps(
++     data = train_test$train,
++     times = dials$n_stability
++   ) |>
++     purrr::pmap(function(splits, id) {
++       
++       stable_wflow |>
++         parsnip::fit(
++           rsample::analysis(splits)
++         ) |>
++         broom::tidy()
++       
++     }, .progress = TRUE) |>
++     withr::with_seed(
++       seed = 12345
++     ) |>
++     dplyr::bind_rows() |>
++     readr::write_csv(
++       here::here("data/stability.csv")
++     )
++   
++ }
+> 
+> #### OLS with Earth Splines ####
+> 
+> model_rec <-
++   recipes::step_rm(
++     recipe = base_rec,
++     property_co,
++     term_frm180,
++     region_northeast
++   )
+> 
+> if (dials$run_mars) {
++   
++   parsnip::mars(
++     mode = "regression",
++     engine = "earth"
++   ) |>
++     workflows::workflow(
++       spec = _,
++       preprocessor = model_rec
++     ) |>
++     parsnip::fit(
++       train_test$train
++     ) |>
++     parsnip::extract_fit_engine() |>
++     purrr::pluck("coefficients") |>
++     print()
++   
++ }
+> 
+> ols_rec <-
++   recipes::step_mutate(
++     recipe = model_rec,
++     fico_lt_720 = pmin(7.2, fico) - 7.2,
++     fico_gt_720 = pmax(7.2, fico) - 7.2,
++     cltv_lt_80 = pmin(8, cltv) - 8,
++     cltv_gt_80 = pmax(8, cltv) - 8
++   ) |>
++   recipes::step_rm(
++     fico,
++     cltv
++   )
+> 
+> ols_mod <-
++   workflows::workflow(
++     ols_rec,
++     parsnip::linear_reg()
++   ) |>
++   parsnip::fit(train_test$train)
+> 
+> ols <- evaluate(ols_mod, train_test)
+> 
+> #### XGBoost ####
+> 
+> bootstrap_data <-
++   rsample::bootstraps(
++     data = train_test$train,
++     times = 3
++   ) |>
++   withr::with_seed(
++     seed = 12345
++   )
+> 
+> xgb_grid <-
++   tidyr::expand_grid(
++     tree_depth = dials$tree_depth,
++     learn_rate = dials$learn_rate,
++     trees = dials$trees
++   )
+> 
+> xgb_wflow <-
++   parsnip::boost_tree(
++     mode = "regression",
++     engine = "xgboost",
++     trees = tune::tune(),
++     tree_depth = tune::tune(),
++     learn_rate = tune::tune()
++   ) |>
++   workflows::workflow(
++     preprocessor = model_rec,
++     spec = _
++   )
+> 
+> if (dials$tune_xgb) {
++   
++   tune::tune_grid(
++     object = xgb_wflow,
++     resamples = bootstrap_data,
++     metrics = metric_bundle,
++     grid = xgb_grid,
++     control = tune::control_grid(verbose = TRUE)
++   ) |>
++     tune::collect_metrics() |>
++     dplyr::select(
++       dplyr::all_of(names(xgb_grid)),
++       metric = .metric,
++       mean
++     ) |>
++     readr::write_csv(
++       here::here("data/tune_xgb.csv")
++     )
++   
++ }
+> 
+> xgb_mod <-
++   list(
++     tree_depth = dials$xgb_depth,
++     learn_rate = dials$xgb_rate,
++     trees = dials$xgb_rounds
++   ) |>
++   tune::finalize_workflow(
++     x = xgb_wflow,
++     parameters = _
++   ) |>
++   parsnip::fit(train_test$train)
+> 
+> xgb <- evaluate(xgb_mod, train_test)
+> 
+> xgb_imp <-
++   parsnip::extract_fit_engine(xgb_mod) |>
++   xgboost::xgb.importance(model = _) |>
++   tibble::as_tibble() |>
++   dplyr::rename_all(tolower)
+> 
+> #### GAM ####
+> 
+> gam_mod <-
++   workflows::workflow(
++     preprocessor = model_rec
++   ) |>
++   workflows::add_model(
++     spec = parsnip::gen_additive_mod("regression"),
++     formula = gam_formula(model_rec)
++   ) |>
++   parsnip::fit(train_test$train)
+> 
+> gam <- evaluate(gam_mod, train_test)
+> 
+> #### Neural Network ####
+> 
+> nn_rec <-
++   recipes::step_normalize(
++     recipe = model_rec,
++     fico, dti, cltv
++   )
+> 
+> h2o::h2o.init()
+
+H2O is not running yet, starting it now...
+
+Note:  In case of errors look at the following log files:
+    /tmp/Rtmp6K0SjH/file1006485f4115/h2o_chris_started_from_r.out
+    /tmp/Rtmp6K0SjH/file10064bff93ea/h2o_chris_started_from_r.err
+
+openjdk version "17.0.10" 2024-01-16
+OpenJDK Runtime Environment (build 17.0.10+7-Ubuntu-123.10.1)
+OpenJDK 64-Bit Server VM (build 17.0.10+7-Ubuntu-123.10.1, mixed mode, sharing)
+
+Starting H2O JVM and connecting: ... Connection successful!
+
+R is connected to the H2O cluster: 
+    H2O cluster uptime:         2 seconds 457 milliseconds 
+    H2O cluster timezone:       America/New_York 
+    H2O data parsing timezone:  UTC 
+    H2O cluster version:        3.44.0.3 
+    H2O cluster version age:    4 months and 8 days 
+    H2O cluster name:           H2O_started_from_R_chris_poi850 
+    H2O cluster total nodes:    1 
+    H2O cluster total memory:   1.92 GB 
+    H2O cluster total cores:    4 
+    H2O cluster allowed cores:  4 
+    H2O cluster healthy:        TRUE 
+    H2O Connection ip:          localhost 
+    H2O Connection port:        54321 
+    H2O Connection proxy:       NA 
+    H2O Internal Security:      FALSE 
+    R Version:                  R version 4.3.1 (2023-06-16) 
+
+Warning message:
+In h2o.clusterInfo() : 
+Your H2O cluster version is (4 months and 8 days) old. There may be a newer version available.
+Please download and install the latest version from: https://h2o-release.s3.amazonaws.com/h2o/latest_stable.html
+> 
+> nn_grid <-
++   tidyr::expand_grid(
++     hidden_units = dials$hidden_units,
++     epochs = dials$epochs
++   )
+> 
+> nn_wflow <-
++   parsnip::mlp(
++     mode = "regression",
++     hidden_units = tune::tune(),
++     epochs = tune::tune(),
++     activation = "tanh"
++   ) |>
++   parsnip::set_engine(
++     engine = "h2o",
++     reproducible = TRUE, 
++     seed = 2468
++   ) |>
++   workflows::workflow(
++     preprocessor = nn_rec,
++     spec = _
++   )
+> 
+> if (dials$tune_net) {
++     
++   tune::tune_grid(
++     object = nn_wflow,
++     resamples = bootstrap_data,
++     metrics = metric_bundle,
++     grid = nn_grid,
++     control = tune::control_grid(verbose = TRUE)
++   ) |>
++     tune::collect_metrics() |>
++     dplyr::select(
++       dplyr::all_of(names(nn_grid)),
++       metric = .metric,
++       mean
++     ) |>
++     readr::write_csv(
++       here::here("data/tune_nn.csv")
++     )
++ 
++ }
+> 
+> nn_mod <-
++   list(
++     hidden_units = dials$nn_nodes,
++     epochs = dials$nn_epochs
++   ) |>
++   tune::finalize_workflow(
++     x = nn_wflow,
++     parameters = _
++   ) |>
++   parsnip::fit(train_test$train)
+> 
+> nn <- evaluate(nn_mod, train_test)
+> 
+> #### Deep Learning with Python and Torch ####
+> 
+> temp_files <-
++   train_test |>
++   purrr::imap_chr(function(data, i) {
++     
++     temp_path <- here::here(i)
++     
++     recipes::bake(
++       object = recipes::prep(nn_rec),
++       new_data = data
++     ) |>
++       readr::write_csv(temp_path)
++     
++     temp_path
++   })
+> 
+> reticulate::use_virtualenv()
+> 
+> reticulate::py_run_file(
++   here::here("src/deep_learning.py")
++ )
+Epoch 0 MSE: 47610820.0
+Epoch 1 MSE: 47601480.0
+Epoch 2 MSE: 47558012.0
+Epoch 3 MSE: 47373496.0
+Epoch 4 MSE: 46799408.0
+Epoch 5 MSE: 45349368.0
+Epoch 6 MSE: 42213844.0
+Epoch 7 MSE: 36333016.0
+Epoch 8 MSE: 26866338.0
+Epoch 9 MSE: 15303929.0
+Epoch 10 MSE: 12930068.0
+Epoch 11 MSE: 23695086.0
+Epoch 12 MSE: 15847869.0
+Epoch 13 MSE: 10512804.0
+Epoch 14 MSE: 11461074.0
+Epoch 15 MSE: 14122869.0
+Epoch 16 MSE: 15802280.0
+Epoch 17 MSE: 15899627.0
+Epoch 18 MSE: 14583234.0
+Epoch 19 MSE: 12401014.0
+Epoch 20 MSE: 10378581.0
+Epoch 21 MSE: 9902450.0
+Epoch 22 MSE: 11349914.0
+Epoch 23 MSE: 12418069.0
+Epoch 24 MSE: 11250000.0
+Epoch 25 MSE: 9532746.0
+Epoch 26 MSE: 9045858.0
+Epoch 27 MSE: 9614326.0
+Epoch 28 MSE: 10308485.0
+Epoch 29 MSE: 10522749.0
+Epoch 30 MSE: 10152193.0
+Epoch 31 MSE: 9473777.0
+Epoch 32 MSE: 8978861.0
+Epoch 33 MSE: 9042004.0
+Epoch 34 MSE: 9460951.0
+Epoch 35 MSE: 9558356.0
+Epoch 36 MSE: 9120905.0
+Epoch 37 MSE: 8658352.0
+Epoch 38 MSE: 8579207.0
+Epoch 39 MSE: 8780715.0
+Epoch 40 MSE: 8952443.0
+Epoch 41 MSE: 8913333.0
+Epoch 42 MSE: 8708414.0
+Epoch 43 MSE: 8530763.0
+Epoch 44 MSE: 8537740.0
+Epoch 45 MSE: 8670480.0
+Epoch 46 MSE: 8708903.0
+Epoch 47 MSE: 8570573.0
+Epoch 48 MSE: 8409491.0
+Epoch 49 MSE: 8372398.5
+Epoch 50 MSE: 8431667.0
+Epoch 51 MSE: 8471067.0
+Epoch 52 MSE: 8428964.0
+Epoch 53 MSE: 8345701.5
+Epoch 54 MSE: 8306060.5
+Epoch 55 MSE: 8338517.0
+Epoch 56 MSE: 8378454.5
+Epoch 57 MSE: 8356227.0
+Epoch 58 MSE: 8292179.5
+Epoch 59 MSE: 8254828.0
+Epoch 60 MSE: 8263405.0
+Epoch 61 MSE: 8278361.0
+Epoch 62 MSE: 8263386.5
+Epoch 63 MSE: 8227059.0
+Epoch 64 MSE: 8205599.5
+Epoch 65 MSE: 8214513.5
+Epoch 66 MSE: 8228786.5
+Epoch 67 MSE: 8219621.0
+Epoch 68 MSE: 8194244.5
+Epoch 69 MSE: 8179460.0
+Epoch 70 MSE: 8181580.5
+Epoch 71 MSE: 8183298.0
+Epoch 72 MSE: 8171674.5
+Epoch 73 MSE: 8154391.5
+Epoch 74 MSE: 8146858.5
+Epoch 75 MSE: 8150351.5
+Epoch 76 MSE: 8151477.5
+Epoch 77 MSE: 8142656.0
+Epoch 78 MSE: 8131726.0
+Epoch 79 MSE: 8127666.0
+Epoch 80 MSE: 8127706.0
+Epoch 81 MSE: 8123782.0
+Epoch 82 MSE: 8114982.5
+Epoch 83 MSE: 8107853.5
+Epoch 84 MSE: 8106150.0
+Epoch 85 MSE: 8105710.0
+Epoch 86 MSE: 8101589.0
+Epoch 87 MSE: 8095365.0
+Epoch 88 MSE: 8091470.0
+Epoch 89 MSE: 8089988.5
+Epoch 90 MSE: 8087378.0
+Epoch 91 MSE: 8082404.0
+Epoch 92 MSE: 8077625.5
+Epoch 93 MSE: 8075045.5
+Epoch 94 MSE: 8073207.0
+Epoch 95 MSE: 8069938.5
+Epoch 96 MSE: 8065831.0
+Epoch 97 MSE: 8062743.5
+Epoch 98 MSE: 8060654.5
+Epoch 99 MSE: 8057991.5
+Epoch 100 MSE: 8054330.5
+Epoch 101 MSE: 8050869.5
+Epoch 102 MSE: 8048329.5
+Epoch 103 MSE: 8045927.5
+Epoch 104 MSE: 8042898.5
+Epoch 105 MSE: 8039724.0
+Epoch 106 MSE: 8037118.5
+Epoch 107 MSE: 8034798.0
+Epoch 108 MSE: 8032103.0
+Epoch 109 MSE: 8029106.5
+Epoch 110 MSE: 8026387.5
+Epoch 111 MSE: 8024007.0
+Epoch 112 MSE: 8021525.5
+Epoch 113 MSE: 8018823.5
+Epoch 114 MSE: 8016232.0
+Epoch 115 MSE: 8013889.0
+Epoch 116 MSE: 8011520.0
+Epoch 117 MSE: 8008953.5
+Epoch 118 MSE: 8006391.0
+Epoch 119 MSE: 8004010.5
+Epoch 120 MSE: 8001675.5
+Epoch 121 MSE: 7999229.5
+Epoch 122 MSE: 7996774.5
+Epoch 123 MSE: 7994434.0
+Epoch 124 MSE: 7992143.0
+Epoch 125 MSE: 7989780.5
+Epoch 126 MSE: 7987398.0
+Epoch 127 MSE: 7985095.5
+Epoch 128 MSE: 7982847.5
+Epoch 129 MSE: 7980568.0
+Epoch 130 MSE: 7978270.5
+Epoch 131 MSE: 7976026.5
+Epoch 132 MSE: 7973821.5
+Epoch 133 MSE: 7971586.0
+Epoch 134 MSE: 7969339.5
+Epoch 135 MSE: 7967131.0
+Epoch 136 MSE: 7964949.5
+Epoch 137 MSE: 7962758.0
+Epoch 138 MSE: 7960556.0
+Epoch 139 MSE: 7958381.5
+Epoch 140 MSE: 7956226.0
+Epoch 141 MSE: 7954061.5
+Epoch 142 MSE: 7951879.0
+Epoch 143 MSE: 7949707.0
+Epoch 144 MSE: 7947538.5
+Epoch 145 MSE: 7945358.5
+Epoch 146 MSE: 7943175.0
+Epoch 147 MSE: 7940996.0
+Epoch 148 MSE: 7938819.5
+Epoch 149 MSE: 7936639.5
+Epoch 150 MSE: 7934455.5
+Epoch 151 MSE: 7932277.0
+Epoch 152 MSE: 7930098.0
+Epoch 153 MSE: 7927914.0
+Epoch 154 MSE: 7925730.5
+Epoch 155 MSE: 7923548.0
+Epoch 156 MSE: 7921363.5
+Epoch 157 MSE: 7919168.5
+Epoch 158 MSE: 7916971.0
+Epoch 159 MSE: 7914768.5
+Epoch 160 MSE: 7912563.0
+Epoch 161 MSE: 7910346.0
+Epoch 162 MSE: 7908127.0
+Epoch 163 MSE: 7905906.0
+Epoch 164 MSE: 7903683.0
+Epoch 165 MSE: 7901449.5
+Epoch 166 MSE: 7899213.0
+Epoch 167 MSE: 7896962.0
+Epoch 168 MSE: 7894702.0
+Epoch 169 MSE: 7892430.0
+Epoch 170 MSE: 7890155.0
+Epoch 171 MSE: 7887870.5
+Epoch 172 MSE: 7885580.0
+Epoch 173 MSE: 7883277.5
+Epoch 174 MSE: 7880961.0
+Epoch 175 MSE: 7878622.0
+Epoch 176 MSE: 7876272.5
+Epoch 177 MSE: 7873921.5
+Epoch 178 MSE: 7871560.0
+Epoch 179 MSE: 7869191.0
+Epoch 180 MSE: 7866816.5
+Epoch 181 MSE: 7864433.5
+Epoch 182 MSE: 7862038.0
+Epoch 183 MSE: 7859635.5
+Epoch 184 MSE: 7857233.0
+Epoch 185 MSE: 7854834.0
+Epoch 186 MSE: 7852428.5
+Epoch 187 MSE: 7850014.5
+Epoch 188 MSE: 7847588.0
+Epoch 189 MSE: 7845142.5
+Epoch 190 MSE: 7842685.0
+Epoch 191 MSE: 7840220.0
+Epoch 192 MSE: 7837753.0
+Epoch 193 MSE: 7835266.0
+Epoch 194 MSE: 7832757.0
+Epoch 195 MSE: 7830234.5
+Epoch 196 MSE: 7827684.5
+Epoch 197 MSE: 7825131.0
+Epoch 198 MSE: 7822585.0
+Epoch 199 MSE: 7820042.0
+Epoch 200 MSE: 7817511.5
+Epoch 201 MSE: 7814993.5
+Epoch 202 MSE: 7812470.5
+Epoch 203 MSE: 7809966.5
+Epoch 204 MSE: 7807478.0
+Epoch 205 MSE: 7805012.5
+Epoch 206 MSE: 7802576.0
+Epoch 207 MSE: 7800166.5
+Epoch 208 MSE: 7797765.5
+Epoch 209 MSE: 7795389.5
+Epoch 210 MSE: 7793039.0
+Epoch 211 MSE: 7790712.0
+Epoch 212 MSE: 7788396.5
+Epoch 213 MSE: 7786088.0
+Epoch 214 MSE: 7783800.5
+Epoch 215 MSE: 7781523.0
+Epoch 216 MSE: 7779247.0
+Epoch 217 MSE: 7776985.0
+Epoch 218 MSE: 7774724.0
+Epoch 219 MSE: 7772471.5
+Epoch 220 MSE: 7770236.5
+Epoch 221 MSE: 7768024.0
+Epoch 222 MSE: 7765823.5
+Epoch 223 MSE: 7763630.0
+Epoch 224 MSE: 7761459.0
+Epoch 225 MSE: 7759295.0
+Epoch 226 MSE: 7757148.0
+Epoch 227 MSE: 7755005.5
+Epoch 228 MSE: 7752880.5
+Epoch 229 MSE: 7750768.0
+Epoch 230 MSE: 7748649.5
+Epoch 231 MSE: 7746551.0
+Epoch 232 MSE: 7744461.0
+Epoch 233 MSE: 7742377.5
+Epoch 234 MSE: 7740321.0
+Epoch 235 MSE: 7738323.0
+Epoch 236 MSE: 7736383.5
+Epoch 237 MSE: 7734473.5
+Epoch 238 MSE: 7732612.5
+Epoch 239 MSE: 7730794.0
+Epoch 240 MSE: 7729021.0
+Epoch 241 MSE: 7727298.0
+Epoch 242 MSE: 7725668.5
+Epoch 243 MSE: 7724125.5
+Epoch 244 MSE: 7722635.0
+Epoch 245 MSE: 7721182.5
+Epoch 246 MSE: 7719777.0
+Epoch 247 MSE: 7718434.0
+Epoch 248 MSE: 7717144.0
+Epoch 249 MSE: 7715892.0
+Epoch 250 MSE: 7714663.0
+Epoch 251 MSE: 7713461.0
+Epoch 252 MSE: 7712290.0
+Epoch 253 MSE: 7711148.0
+Epoch 254 MSE: 7710039.0
+Epoch 255 MSE: 7708958.5
+Epoch 256 MSE: 7707912.5
+Epoch 257 MSE: 7706897.5
+Epoch 258 MSE: 7705927.5
+Epoch 259 MSE: 7704991.5
+Epoch 260 MSE: 7704085.5
+Epoch 261 MSE: 7703210.0
+Epoch 262 MSE: 7702358.5
+Epoch 263 MSE: 7701527.0
+Epoch 264 MSE: 7700719.5
+Epoch 265 MSE: 7699938.0
+Epoch 266 MSE: 7699178.5
+Epoch 267 MSE: 7698444.0
+Epoch 268 MSE: 7697725.0
+Epoch 269 MSE: 7697023.5
+Epoch 270 MSE: 7696350.0
+Epoch 271 MSE: 7695694.5
+Epoch 272 MSE: 7695052.0
+Epoch 273 MSE: 7694433.5
+Epoch 274 MSE: 7693828.5
+Epoch 275 MSE: 7693236.0
+Epoch 276 MSE: 7692662.5
+Epoch 277 MSE: 7692103.5
+Epoch 278 MSE: 7691559.0
+Epoch 279 MSE: 7691029.0
+Epoch 280 MSE: 7690511.0
+Epoch 281 MSE: 7690006.5
+Epoch 282 MSE: 7689514.0
+Epoch 283 MSE: 7689033.0
+Epoch 284 MSE: 7688568.0
+Epoch 285 MSE: 7688118.0
+Epoch 286 MSE: 7687677.5
+Epoch 287 MSE: 7687247.0
+Epoch 288 MSE: 7686832.5
+Epoch 289 MSE: 7686427.0
+Epoch 290 MSE: 7686027.0
+Epoch 291 MSE: 7685636.0
+Epoch 292 MSE: 7685250.0
+Epoch 293 MSE: 7684873.0
+Epoch 294 MSE: 7684501.0
+Epoch 295 MSE: 7684129.5
+Epoch 296 MSE: 7683758.5
+Epoch 297 MSE: 7683393.0
+Epoch 298 MSE: 7683032.5
+Epoch 299 MSE: 7682674.0
+Epoch 300 MSE: 7682317.5
+Epoch 301 MSE: 7681964.5
+Epoch 302 MSE: 7681618.5
+Epoch 303 MSE: 7681279.5
+Epoch 304 MSE: 7680940.5
+Epoch 305 MSE: 7680605.0
+Epoch 306 MSE: 7680272.5
+Epoch 307 MSE: 7679945.0
+Epoch 308 MSE: 7679624.0
+Epoch 309 MSE: 7679302.5
+Epoch 310 MSE: 7678983.5
+Epoch 311 MSE: 7678666.5
+Epoch 312 MSE: 7678349.0
+Epoch 313 MSE: 7678034.0
+Epoch 314 MSE: 7677723.5
+Epoch 315 MSE: 7677416.5
+Epoch 316 MSE: 7677115.5
+Epoch 317 MSE: 7676816.0
+Epoch 318 MSE: 7676521.5
+Epoch 319 MSE: 7676231.0
+Epoch 320 MSE: 7675944.5
+Epoch 321 MSE: 7675666.0
+Epoch 322 MSE: 7675393.5
+Epoch 323 MSE: 7675126.5
+Epoch 324 MSE: 7674862.0
+Epoch 325 MSE: 7674598.5
+Epoch 326 MSE: 7674334.5
+Epoch 327 MSE: 7674068.0
+Epoch 328 MSE: 7673803.0
+Epoch 329 MSE: 7673542.0
+Epoch 330 MSE: 7673283.0
+Epoch 331 MSE: 7673029.0
+Epoch 332 MSE: 7672771.0
+Epoch 333 MSE: 7672521.0
+Epoch 334 MSE: 7672280.5
+Epoch 335 MSE: 7672044.5
+Epoch 336 MSE: 7671815.5
+Epoch 337 MSE: 7671594.5
+Epoch 338 MSE: 7671374.5
+Epoch 339 MSE: 7671161.5
+Epoch 340 MSE: 7670947.0
+Epoch 341 MSE: 7670734.0
+Epoch 342 MSE: 7670524.5
+Epoch 343 MSE: 7670318.5
+Epoch 344 MSE: 7670121.0
+Epoch 345 MSE: 7669926.5
+Epoch 346 MSE: 7669738.5
+Epoch 347 MSE: 7669555.5
+Epoch 348 MSE: 7669374.5
+Epoch 349 MSE: 7669197.0
+Epoch 350 MSE: 7669023.5
+Epoch 351 MSE: 7668849.5
+Epoch 352 MSE: 7668677.5
+Epoch 353 MSE: 7668508.5
+Epoch 354 MSE: 7668347.5
+Epoch 355 MSE: 7668188.5
+Epoch 356 MSE: 7668028.0
+Epoch 357 MSE: 7667870.0
+Epoch 358 MSE: 7667714.5
+Epoch 359 MSE: 7667556.5
+Epoch 360 MSE: 7667399.0
+Epoch 361 MSE: 7667246.0
+Epoch 362 MSE: 7667096.5
+Epoch 363 MSE: 7666950.0
+Epoch 364 MSE: 7666809.0
+Epoch 365 MSE: 7666668.5
+Epoch 366 MSE: 7666531.0
+Epoch 367 MSE: 7666395.5
+Epoch 368 MSE: 7666262.5
+Epoch 369 MSE: 7666130.0
+Epoch 370 MSE: 7665999.5
+Epoch 371 MSE: 7665872.0
+Epoch 372 MSE: 7665746.0
+Epoch 373 MSE: 7665624.5
+Epoch 374 MSE: 7665503.0
+Epoch 375 MSE: 7665382.0
+Epoch 376 MSE: 7665262.5
+Epoch 377 MSE: 7665144.5
+Epoch 378 MSE: 7665025.5
+Epoch 379 MSE: 7664906.5
+Epoch 380 MSE: 7664787.0
+Epoch 381 MSE: 7664670.5
+Epoch 382 MSE: 7664554.5
+Epoch 383 MSE: 7664440.0
+Epoch 384 MSE: 7664328.0
+Epoch 385 MSE: 7664217.0
+Epoch 386 MSE: 7664106.5
+Epoch 387 MSE: 7663995.5
+Epoch 388 MSE: 7663888.0
+Epoch 389 MSE: 7663780.0
+Epoch 390 MSE: 7663673.5
+Epoch 391 MSE: 7663565.0
+Epoch 392 MSE: 7663458.5
+Epoch 393 MSE: 7663350.5
+Epoch 394 MSE: 7663240.5
+Epoch 395 MSE: 7663128.5
+Epoch 396 MSE: 7663017.0
+Epoch 397 MSE: 7662904.0
+Epoch 398 MSE: 7662793.0
+Epoch 399 MSE: 7662685.0
+Epoch 400 MSE: 7662577.5
+Epoch 401 MSE: 7662472.0
+Epoch 402 MSE: 7662368.0
+Epoch 403 MSE: 7662271.5
+Epoch 404 MSE: 7662176.5
+Epoch 405 MSE: 7662085.0
+Epoch 406 MSE: 7661994.5
+Epoch 407 MSE: 7661908.0
+Epoch 408 MSE: 7661822.5
+Epoch 409 MSE: 7661738.5
+Epoch 410 MSE: 7661651.5
+Epoch 411 MSE: 7661567.0
+Epoch 412 MSE: 7661483.5
+Epoch 413 MSE: 7661402.0
+Epoch 414 MSE: 7661318.5
+Epoch 415 MSE: 7661235.0
+Epoch 416 MSE: 7661153.5
+Epoch 417 MSE: 7661077.5
+Epoch 418 MSE: 7661002.0
+Epoch 419 MSE: 7660930.0
+Epoch 420 MSE: 7660859.0
+Epoch 421 MSE: 7660790.0
+Epoch 422 MSE: 7660718.0
+Epoch 423 MSE: 7660643.5
+Epoch 424 MSE: 7660570.5
+Epoch 425 MSE: 7660495.5
+Epoch 426 MSE: 7660421.5
+Epoch 427 MSE: 7660350.5
+Epoch 428 MSE: 7660283.0
+Epoch 429 MSE: 7660216.0
+Epoch 430 MSE: 7660147.5
+Epoch 431 MSE: 7660080.0
+Epoch 432 MSE: 7660012.5
+Epoch 433 MSE: 7659944.5
+Epoch 434 MSE: 7659877.0
+Epoch 435 MSE: 7659812.0
+Epoch 436 MSE: 7659746.5
+Epoch 437 MSE: 7659682.5
+Epoch 438 MSE: 7659623.0
+Epoch 439 MSE: 7659565.5
+Epoch 440 MSE: 7659508.0
+Epoch 441 MSE: 7659452.0
+Epoch 442 MSE: 7659395.0
+Epoch 443 MSE: 7659337.5
+Epoch 444 MSE: 7659277.0
+Epoch 445 MSE: 7659217.5
+Epoch 446 MSE: 7659160.0
+Epoch 447 MSE: 7659102.5
+Epoch 448 MSE: 7659044.0
+Epoch 449 MSE: 7658985.0
+Epoch 450 MSE: 7658926.0
+Epoch 451 MSE: 7658865.5
+Epoch 452 MSE: 7658803.5
+Epoch 453 MSE: 7658740.5
+Epoch 454 MSE: 7658674.5
+Epoch 455 MSE: 7658609.0
+Epoch 456 MSE: 7658543.5
+Epoch 457 MSE: 7658477.0
+Epoch 458 MSE: 7658407.0
+Epoch 459 MSE: 7658334.0
+Epoch 460 MSE: 7658259.5
+Epoch 461 MSE: 7658185.0
+Epoch 462 MSE: 7658108.0
+Epoch 463 MSE: 7658029.5
+Epoch 464 MSE: 7657952.5
+Epoch 465 MSE: 7657874.5
+Epoch 466 MSE: 7657797.0
+Epoch 467 MSE: 7657722.0
+Epoch 468 MSE: 7657647.5
+Epoch 469 MSE: 7657574.5
+Epoch 470 MSE: 7657498.0
+Epoch 471 MSE: 7657423.5
+Epoch 472 MSE: 7657351.0
+Epoch 473 MSE: 7657281.5
+Epoch 474 MSE: 7657210.0
+Epoch 475 MSE: 7657138.0
+Epoch 476 MSE: 7657063.5
+Epoch 477 MSE: 7656990.0
+Epoch 478 MSE: 7656924.0
+Epoch 479 MSE: 7656858.5
+Epoch 480 MSE: 7656794.0
+Epoch 481 MSE: 7656732.5
+Epoch 482 MSE: 7656673.0
+Epoch 483 MSE: 7656614.5
+Epoch 484 MSE: 7656558.0
+Epoch 485 MSE: 7656502.0
+Epoch 486 MSE: 7656447.0
+Epoch 487 MSE: 7656392.5
+Epoch 488 MSE: 7656339.5
+Epoch 489 MSE: 7656288.0
+Epoch 490 MSE: 7656236.5
+Epoch 491 MSE: 7656186.0
+Epoch 492 MSE: 7656133.5
+Epoch 493 MSE: 7656081.5
+Epoch 494 MSE: 7656029.0
+Epoch 495 MSE: 7655980.0
+Epoch 496 MSE: 7655929.5
+Epoch 497 MSE: 7655880.0
+Epoch 498 MSE: 7655828.5
+Epoch 499 MSE: 7655774.5
+Epoch 500 MSE: 7655718.5
+Epoch 501 MSE: 7655665.0
+Epoch 502 MSE: 7655614.0
+Epoch 503 MSE: 7655566.0
+Epoch 504 MSE: 7655518.0
+Epoch 505 MSE: 7655466.5
+Epoch 506 MSE: 7655415.0
+Epoch 507 MSE: 7655366.0
+Epoch 508 MSE: 7655317.5
+Epoch 509 MSE: 7655269.5
+Epoch 510 MSE: 7655223.5
+Epoch 511 MSE: 7655176.5
+Epoch 512 MSE: 7655128.5
+Epoch 513 MSE: 7655079.5
+Epoch 514 MSE: 7655031.5
+Epoch 515 MSE: 7654984.0
+Epoch 516 MSE: 7654936.0
+Epoch 517 MSE: 7654889.0
+Epoch 518 MSE: 7654843.5
+Epoch 519 MSE: 7654799.5
+Epoch 520 MSE: 7654756.5
+Epoch 521 MSE: 7654714.0
+Epoch 522 MSE: 7654671.5
+Epoch 523 MSE: 7654630.0
+Epoch 524 MSE: 7654587.0
+Epoch 525 MSE: 7654545.5
+Epoch 526 MSE: 7654502.0
+Epoch 527 MSE: 7654459.5
+Epoch 528 MSE: 7654419.5
+Epoch 529 MSE: 7654378.5
+Epoch 530 MSE: 7654339.5
+Epoch 531 MSE: 7654300.5
+Epoch 532 MSE: 7654261.5
+Epoch 533 MSE: 7654224.5
+Epoch 534 MSE: 7654186.0
+Epoch 535 MSE: 7654147.0
+Epoch 536 MSE: 7654110.0
+Epoch 537 MSE: 7654072.0
+Epoch 538 MSE: 7654033.5
+Epoch 539 MSE: 7653993.5
+Epoch 540 MSE: 7653953.0
+Epoch 541 MSE: 7653911.0
+Epoch 542 MSE: 7653871.0
+Epoch 543 MSE: 7653833.0
+Epoch 544 MSE: 7653795.0
+Epoch 545 MSE: 7653757.0
+Epoch 546 MSE: 7653719.5
+Epoch 547 MSE: 7653681.5
+Epoch 548 MSE: 7653643.0
+Epoch 549 MSE: 7653605.0
+Epoch 550 MSE: 7653564.5
+Epoch 551 MSE: 7653523.5
+Epoch 552 MSE: 7653483.5
+Epoch 553 MSE: 7653444.5
+Epoch 554 MSE: 7653406.5
+Epoch 555 MSE: 7653367.5
+Epoch 556 MSE: 7653330.0
+Epoch 557 MSE: 7653292.0
+Epoch 558 MSE: 7653253.5
+Epoch 559 MSE: 7653214.5
+Epoch 560 MSE: 7653175.0
+Epoch 561 MSE: 7653134.0
+Epoch 562 MSE: 7653093.0
+Epoch 563 MSE: 7653053.0
+Epoch 564 MSE: 7653014.0
+Epoch 565 MSE: 7652975.0
+Epoch 566 MSE: 7652936.0
+Epoch 567 MSE: 7652898.0
+Epoch 568 MSE: 7652860.0
+Epoch 569 MSE: 7652821.0
+Epoch 570 MSE: 7652781.5
+Epoch 571 MSE: 7652742.0
+Epoch 572 MSE: 7652701.0
+Epoch 573 MSE: 7652660.0
+Epoch 574 MSE: 7652620.0
+Epoch 575 MSE: 7652581.0
+Epoch 576 MSE: 7652542.0
+Epoch 577 MSE: 7652503.0
+Epoch 578 MSE: 7652460.5
+Epoch 579 MSE: 7652419.5
+Epoch 580 MSE: 7652377.0
+Epoch 581 MSE: 7652336.5
+Epoch 582 MSE: 7652297.5
+Epoch 583 MSE: 7652258.5
+Epoch 584 MSE: 7652218.5
+Epoch 585 MSE: 7652178.5
+Epoch 586 MSE: 7652139.5
+Epoch 587 MSE: 7652099.5
+Epoch 588 MSE: 7652062.0
+Epoch 589 MSE: 7652024.0
+Epoch 590 MSE: 7651986.0
+Epoch 591 MSE: 7651947.5
+Epoch 592 MSE: 7651910.5
+Epoch 593 MSE: 7651871.5
+Epoch 594 MSE: 7651832.5
+Epoch 595 MSE: 7651792.5
+Epoch 596 MSE: 7651754.5
+Epoch 597 MSE: 7651715.5
+Epoch 598 MSE: 7651675.5
+Epoch 599 MSE: 7651635.5
+Epoch 600 MSE: 7651594.5
+Epoch 601 MSE: 7651554.5
+Epoch 602 MSE: 7651514.0
+Epoch 603 MSE: 7651472.0
+Epoch 604 MSE: 7651429.5
+Epoch 605 MSE: 7651387.0
+Epoch 606 MSE: 7651344.5
+Epoch 607 MSE: 7651303.5
+Epoch 608 MSE: 7651263.5
+Epoch 609 MSE: 7651224.5
+Epoch 610 MSE: 7651185.5
+Epoch 611 MSE: 7651147.5
+Epoch 612 MSE: 7651108.5
+Epoch 613 MSE: 7651067.5
+Epoch 614 MSE: 7651027.0
+Epoch 615 MSE: 7650985.0
+Epoch 616 MSE: 7650943.5
+Epoch 617 MSE: 7650902.5
+Epoch 618 MSE: 7650862.0
+Epoch 619 MSE: 7650819.0
+Epoch 620 MSE: 7650777.5
+Epoch 621 MSE: 7650737.5
+Epoch 622 MSE: 7650696.5
+Epoch 623 MSE: 7650657.5
+Epoch 624 MSE: 7650618.0
+Epoch 625 MSE: 7650578.0
+Epoch 626 MSE: 7650539.0
+Epoch 627 MSE: 7650501.5
+Epoch 628 MSE: 7650464.5
+Epoch 629 MSE: 7650426.0
+Epoch 630 MSE: 7650389.0
+Epoch 631 MSE: 7650350.5
+Epoch 632 MSE: 7650312.5
+Epoch 633 MSE: 7650274.5
+Epoch 634 MSE: 7650236.5
+Epoch 635 MSE: 7650196.5
+Epoch 636 MSE: 7650154.5
+Epoch 637 MSE: 7650114.5
+Epoch 638 MSE: 7650075.5
+Epoch 639 MSE: 7650037.5
+Epoch 640 MSE: 7650000.5
+Epoch 641 MSE: 7649965.5
+Epoch 642 MSE: 7649931.0
+Epoch 643 MSE: 7649895.5
+Epoch 644 MSE: 7649860.0
+Epoch 645 MSE: 7649823.5
+Epoch 646 MSE: 7649786.5
+Epoch 647 MSE: 7649746.5
+Epoch 648 MSE: 7649706.5
+Epoch 649 MSE: 7649665.0
+Epoch 650 MSE: 7649623.0
+Epoch 651 MSE: 7649583.5
+Epoch 652 MSE: 7649543.5
+Epoch 653 MSE: 7649506.0
+Epoch 654 MSE: 7649469.0
+Epoch 655 MSE: 7649431.5
+Epoch 656 MSE: 7649392.5
+Epoch 657 MSE: 7649355.0
+Epoch 658 MSE: 7649315.5
+Epoch 659 MSE: 7649276.5
+Epoch 660 MSE: 7649236.5
+Epoch 661 MSE: 7649194.0
+Epoch 662 MSE: 7649150.5
+Epoch 663 MSE: 7649103.5
+Epoch 664 MSE: 7649056.5
+Epoch 665 MSE: 7649005.5
+Epoch 666 MSE: 7648953.5
+Epoch 667 MSE: 7648900.0
+Epoch 668 MSE: 7648847.0
+Epoch 669 MSE: 7648797.0
+Epoch 670 MSE: 7648750.0
+Epoch 671 MSE: 7648703.0
+Epoch 672 MSE: 7648657.0
+Epoch 673 MSE: 7648611.0
+Epoch 674 MSE: 7648564.0
+Epoch 675 MSE: 7648517.0
+Epoch 676 MSE: 7648470.0
+Epoch 677 MSE: 7648421.0
+Epoch 678 MSE: 7648374.0
+Epoch 679 MSE: 7648328.0
+Epoch 680 MSE: 7648282.5
+Epoch 681 MSE: 7648237.5
+Epoch 682 MSE: 7648191.0
+Epoch 683 MSE: 7648146.0
+Epoch 684 MSE: 7648101.5
+Epoch 685 MSE: 7648060.0
+Epoch 686 MSE: 7648016.5
+Epoch 687 MSE: 7647973.0
+Epoch 688 MSE: 7647928.5
+Epoch 689 MSE: 7647887.0
+Epoch 690 MSE: 7647845.0
+Epoch 691 MSE: 7647802.5
+Epoch 692 MSE: 7647758.0
+Epoch 693 MSE: 7647713.0
+Epoch 694 MSE: 7647669.5
+Epoch 695 MSE: 7647626.0
+Epoch 696 MSE: 7647584.5
+Epoch 697 MSE: 7647542.0
+Epoch 698 MSE: 7647501.0
+Epoch 699 MSE: 7647457.5
+Epoch 700 MSE: 7647415.0
+Epoch 701 MSE: 7647373.0
+Epoch 702 MSE: 7647330.5
+Epoch 703 MSE: 7647289.0
+Epoch 704 MSE: 7647246.5
+Epoch 705 MSE: 7647203.0
+Epoch 706 MSE: 7647156.5
+Epoch 707 MSE: 7647113.0
+Epoch 708 MSE: 7647066.0
+Epoch 709 MSE: 7647020.0
+Epoch 710 MSE: 7646973.0
+Epoch 711 MSE: 7646928.0
+Epoch 712 MSE: 7646882.5
+Epoch 713 MSE: 7646834.5
+Epoch 714 MSE: 7646784.0
+Epoch 715 MSE: 7646733.5
+Epoch 716 MSE: 7646681.0
+Epoch 717 MSE: 7646633.0
+Epoch 718 MSE: 7646584.5
+Epoch 719 MSE: 7646534.5
+Epoch 720 MSE: 7646485.0
+Epoch 721 MSE: 7646438.0
+Epoch 722 MSE: 7646392.0
+Epoch 723 MSE: 7646350.0
+Epoch 724 MSE: 7646311.0
+Epoch 725 MSE: 7646270.5
+Epoch 726 MSE: 7646227.0
+Epoch 727 MSE: 7646182.5
+Epoch 728 MSE: 7646138.0
+Epoch 729 MSE: 7646092.0
+Epoch 730 MSE: 7646044.0
+Epoch 731 MSE: 7645997.0
+Epoch 732 MSE: 7645951.0
+Epoch 733 MSE: 7645902.0
+Epoch 734 MSE: 7645854.0
+Epoch 735 MSE: 7645810.0
+Epoch 736 MSE: 7645761.0
+Epoch 737 MSE: 7645714.0
+Epoch 738 MSE: 7645670.5
+Epoch 739 MSE: 7645625.5
+Epoch 740 MSE: 7645583.0
+Epoch 741 MSE: 7645539.5
+Epoch 742 MSE: 7645497.5
+Epoch 743 MSE: 7645455.0
+Epoch 744 MSE: 7645410.5
+Epoch 745 MSE: 7645367.0
+Epoch 746 MSE: 7645323.0
+Epoch 747 MSE: 7645277.5
+Epoch 748 MSE: 7645233.0
+Epoch 749 MSE: 7645190.5
+Epoch 750 MSE: 7645149.0
+Epoch 751 MSE: 7645108.0
+Epoch 752 MSE: 7645069.0
+Epoch 753 MSE: 7645030.0
+Epoch 754 MSE: 7644992.5
+Epoch 755 MSE: 7644955.5
+Epoch 756 MSE: 7644917.5
+Epoch 757 MSE: 7644882.0
+Epoch 758 MSE: 7644847.0
+Epoch 759 MSE: 7644812.5
+Epoch 760 MSE: 7644775.5
+Epoch 761 MSE: 7644740.0
+Epoch 762 MSE: 7644706.0
+Epoch 763 MSE: 7644673.5
+Epoch 764 MSE: 7644640.5
+Epoch 765 MSE: 7644609.5
+Epoch 766 MSE: 7644579.5
+Epoch 767 MSE: 7644551.0
+Epoch 768 MSE: 7644523.5
+Epoch 769 MSE: 7644495.0
+Epoch 770 MSE: 7644466.5
+Epoch 771 MSE: 7644438.0
+Epoch 772 MSE: 7644410.5
+Epoch 773 MSE: 7644381.5
+Epoch 774 MSE: 7644355.5
+Epoch 775 MSE: 7644328.0
+Epoch 776 MSE: 7644301.5
+Epoch 777 MSE: 7644276.0
+Epoch 778 MSE: 7644250.0
+Epoch 779 MSE: 7644223.5
+Epoch 780 MSE: 7644197.0
+Epoch 781 MSE: 7644167.5
+Epoch 782 MSE: 7644140.0
+Epoch 783 MSE: 7644113.5
+Epoch 784 MSE: 7644087.0
+Epoch 785 MSE: 7644060.5
+Epoch 786 MSE: 7644033.5
+Epoch 787 MSE: 7644007.0
+Epoch 788 MSE: 7643981.5
+Epoch 789 MSE: 7643955.5
+Epoch 790 MSE: 7643929.0
+Epoch 791 MSE: 7643902.5
+Epoch 792 MSE: 7643875.0
+Epoch 793 MSE: 7643847.5
+Epoch 794 MSE: 7643819.0
+Epoch 795 MSE: 7643789.0
+Epoch 796 MSE: 7643759.5
+Epoch 797 MSE: 7643729.5
+Epoch 798 MSE: 7643697.5
+Epoch 799 MSE: 7643667.0
+Epoch 800 MSE: 7643638.0
+Epoch 801 MSE: 7643609.5
+Epoch 802 MSE: 7643581.0
+Epoch 803 MSE: 7643553.0
+Epoch 804 MSE: 7643524.5
+Epoch 805 MSE: 7643495.0
+Epoch 806 MSE: 7643465.0
+Epoch 807 MSE: 7643434.0
+Epoch 808 MSE: 7643403.5
+Epoch 809 MSE: 7643374.5
+Epoch 810 MSE: 7643347.0
+Epoch 811 MSE: 7643318.5
+Epoch 812 MSE: 7643289.5
+Epoch 813 MSE: 7643259.0
+Epoch 814 MSE: 7643228.0
+Epoch 815 MSE: 7643196.0
+Epoch 816 MSE: 7643167.0
+Epoch 817 MSE: 7643136.0
+Epoch 818 MSE: 7643105.5
+Epoch 819 MSE: 7643073.5
+Epoch 820 MSE: 7643040.0
+Epoch 821 MSE: 7643006.0
+Epoch 822 MSE: 7642971.5
+Epoch 823 MSE: 7642936.0
+Epoch 824 MSE: 7642900.0
+Epoch 825 MSE: 7642864.5
+Epoch 826 MSE: 7642828.0
+Epoch 827 MSE: 7642791.5
+Epoch 828 MSE: 7642756.0
+Epoch 829 MSE: 7642720.5
+Epoch 830 MSE: 7642682.5
+Epoch 831 MSE: 7642640.5
+Epoch 832 MSE: 7642601.0
+Epoch 833 MSE: 7642561.0
+Epoch 834 MSE: 7642522.0
+Epoch 835 MSE: 7642483.0
+Epoch 836 MSE: 7642441.0
+Epoch 837 MSE: 7642397.5
+Epoch 838 MSE: 7642351.5
+Epoch 839 MSE: 7642307.0
+Epoch 840 MSE: 7642263.5
+Epoch 841 MSE: 7642216.5
+Epoch 842 MSE: 7642169.5
+Epoch 843 MSE: 7642126.0
+Epoch 844 MSE: 7642084.5
+Epoch 845 MSE: 7642043.5
+Epoch 846 MSE: 7642002.0
+Epoch 847 MSE: 7641961.0
+Epoch 848 MSE: 7641920.5
+Epoch 849 MSE: 7641880.5
+Epoch 850 MSE: 7641841.5
+Epoch 851 MSE: 7641801.5
+Epoch 852 MSE: 7641762.5
+Epoch 853 MSE: 7641725.0
+Epoch 854 MSE: 7641686.0
+Epoch 855 MSE: 7641647.0
+Epoch 856 MSE: 7641604.5
+Epoch 857 MSE: 7641562.0
+Epoch 858 MSE: 7641521.0
+Epoch 859 MSE: 7641477.5
+Epoch 860 MSE: 7641433.0
+Epoch 861 MSE: 7641387.0
+Epoch 862 MSE: 7641342.0
+Epoch 863 MSE: 7641299.0
+Epoch 864 MSE: 7641256.5
+Epoch 865 MSE: 7641209.5
+Epoch 866 MSE: 7641162.5
+Epoch 867 MSE: 7641111.0
+Epoch 868 MSE: 7641059.5
+Epoch 869 MSE: 7641009.0
+Epoch 870 MSE: 7640957.5
+Epoch 871 MSE: 7640907.0
+Epoch 872 MSE: 7640857.5
+Epoch 873 MSE: 7640806.0
+Epoch 874 MSE: 7640751.0
+Epoch 875 MSE: 7640696.0
+Epoch 876 MSE: 7640644.5
+Epoch 877 MSE: 7640593.0
+Epoch 878 MSE: 7640538.0
+Epoch 879 MSE: 7640481.0
+Epoch 880 MSE: 7640422.5
+Epoch 881 MSE: 7640364.0
+Epoch 882 MSE: 7640302.0
+Epoch 883 MSE: 7640240.0
+Epoch 884 MSE: 7640176.0
+Epoch 885 MSE: 7640110.5
+Epoch 886 MSE: 7640042.0
+Epoch 887 MSE: 7639972.0
+Epoch 888 MSE: 7639903.5
+Epoch 889 MSE: 7639833.5
+Epoch 890 MSE: 7639763.5
+Epoch 891 MSE: 7639695.0
+Epoch 892 MSE: 7639626.0
+Epoch 893 MSE: 7639559.5
+Epoch 894 MSE: 7639495.5
+Epoch 895 MSE: 7639429.0
+Epoch 896 MSE: 7639365.0
+Epoch 897 MSE: 7639298.5
+Epoch 898 MSE: 7639230.0
+Epoch 899 MSE: 7639163.5
+Epoch 900 MSE: 7639099.0
+Epoch 901 MSE: 7639029.5
+Epoch 902 MSE: 7638958.0
+Epoch 903 MSE: 7638888.5
+Epoch 904 MSE: 7638817.5
+Epoch 905 MSE: 7638750.0
+Epoch 906 MSE: 7638680.0
+Epoch 907 MSE: 7638614.5
+Epoch 908 MSE: 7638549.0
+Epoch 909 MSE: 7638484.0
+Epoch 910 MSE: 7638421.0
+Epoch 911 MSE: 7638361.5
+Epoch 912 MSE: 7638304.0
+Epoch 913 MSE: 7638245.5
+Epoch 914 MSE: 7638186.0
+Epoch 915 MSE: 7638133.5
+Epoch 916 MSE: 7638080.5
+Epoch 917 MSE: 7638026.0
+Epoch 918 MSE: 7637968.5
+Epoch 919 MSE: 7637912.5
+Epoch 920 MSE: 7637857.0
+Epoch 921 MSE: 7637800.0
+Epoch 922 MSE: 7637746.0
+Epoch 923 MSE: 7637693.5
+Epoch 924 MSE: 7637641.0
+Epoch 925 MSE: 7637588.0
+Epoch 926 MSE: 7637534.5
+Epoch 927 MSE: 7637479.5
+Epoch 928 MSE: 7637424.0
+Epoch 929 MSE: 7637366.0
+Epoch 930 MSE: 7637307.5
+Epoch 931 MSE: 7637249.0
+Epoch 932 MSE: 7637189.5
+Epoch 933 MSE: 7637128.5
+Epoch 934 MSE: 7637065.5
+Epoch 935 MSE: 7637000.5
+Epoch 936 MSE: 7636934.0
+Epoch 937 MSE: 7636864.0
+Epoch 938 MSE: 7636793.0
+Epoch 939 MSE: 7636721.0
+Epoch 940 MSE: 7636647.5
+Epoch 941 MSE: 7636575.5
+Epoch 942 MSE: 7636503.5
+Epoch 943 MSE: 7636431.0
+Epoch 944 MSE: 7636357.5
+Epoch 945 MSE: 7636283.5
+Epoch 946 MSE: 7636212.0
+Epoch 947 MSE: 7636137.5
+Epoch 948 MSE: 7636057.5
+Epoch 949 MSE: 7635977.5
+Epoch 950 MSE: 7635895.0
+Epoch 951 MSE: 7635814.5
+Epoch 952 MSE: 7635736.5
+Epoch 953 MSE: 7635665.5
+Epoch 954 MSE: 7635592.5
+Epoch 955 MSE: 7635520.5
+Epoch 956 MSE: 7635442.5
+Epoch 957 MSE: 7635358.5
+Epoch 958 MSE: 7635268.5
+Epoch 959 MSE: 7635175.5
+Epoch 960 MSE: 7635079.0
+Epoch 961 MSE: 7634983.0
+Epoch 962 MSE: 7634886.5
+Epoch 963 MSE: 7634788.0
+Epoch 964 MSE: 7634689.5
+Epoch 965 MSE: 7634593.5
+Epoch 966 MSE: 7634494.0
+Epoch 967 MSE: 7634395.5
+Epoch 968 MSE: 7634294.5
+Epoch 969 MSE: 7634192.5
+Epoch 970 MSE: 7634090.5
+Epoch 971 MSE: 7633990.0
+Epoch 972 MSE: 7633888.0
+Epoch 973 MSE: 7633787.0
+Epoch 974 MSE: 7633683.0
+Epoch 975 MSE: 7633577.0
+Epoch 976 MSE: 7633474.0
+Epoch 977 MSE: 7633369.0
+Epoch 978 MSE: 7633268.0
+Epoch 979 MSE: 7633166.0
+Epoch 980 MSE: 7633061.5
+Epoch 981 MSE: 7632951.5
+Epoch 982 MSE: 7632836.0
+Epoch 983 MSE: 7632716.0
+Epoch 984 MSE: 7632593.5
+Epoch 985 MSE: 7632476.5
+Epoch 986 MSE: 7632352.5
+Epoch 987 MSE: 7632225.5
+Epoch 988 MSE: 7632107.5
+Epoch 989 MSE: 7631992.0
+Epoch 990 MSE: 7631881.5
+Epoch 991 MSE: 7631775.5
+Epoch 992 MSE: 7631667.5
+Epoch 993 MSE: 7631559.0
+Epoch 994 MSE: 7631462.5
+Epoch 995 MSE: 7631369.5
+Epoch 996 MSE: 7631275.5
+Epoch 997 MSE: 7631185.0
+Epoch 998 MSE: 7631089.0
+Epoch 999 MSE: 7631003.0
+Epoch 1000 MSE: 7630920.5
+Epoch 1001 MSE: 7630841.5
+Epoch 1002 MSE: 7630757.0
+Epoch 1003 MSE: 7630668.5
+Epoch 1004 MSE: 7630579.5
+Epoch 1005 MSE: 7630494.5
+Epoch 1006 MSE: 7630413.0
+Epoch 1007 MSE: 7630333.0
+Epoch 1008 MSE: 7630258.5
+Epoch 1009 MSE: 7630191.0
+Epoch 1010 MSE: 7630122.0
+Epoch 1011 MSE: 7630052.5
+Epoch 1012 MSE: 7629983.5
+Epoch 1013 MSE: 7629911.0
+Epoch 1014 MSE: 7629836.0
+Epoch 1015 MSE: 7629765.0
+Epoch 1016 MSE: 7629695.0
+Epoch 1017 MSE: 7629627.0
+Epoch 1018 MSE: 7629560.5
+Epoch 1019 MSE: 7629494.0
+Epoch 1020 MSE: 7629428.0
+Epoch 1021 MSE: 7629362.5
+Epoch 1022 MSE: 7629297.0
+Epoch 1023 MSE: 7629230.5
+Epoch 1024 MSE: 7629163.0
+Epoch 1025 MSE: 7629093.5
+Epoch 1026 MSE: 7629026.0
+Epoch 1027 MSE: 7628958.0
+Epoch 1028 MSE: 7628888.0
+Epoch 1029 MSE: 7628817.5
+Epoch 1030 MSE: 7628745.0
+Epoch 1031 MSE: 7628670.5
+Epoch 1032 MSE: 7628597.0
+Epoch 1033 MSE: 7628530.0
+Epoch 1034 MSE: 7628462.0
+Epoch 1035 MSE: 7628394.5
+Epoch 1036 MSE: 7628322.5
+Epoch 1037 MSE: 7628251.5
+Epoch 1038 MSE: 7628180.5
+Epoch 1039 MSE: 7628109.0
+Epoch 1040 MSE: 7628038.5
+Epoch 1041 MSE: 7627969.5
+Epoch 1042 MSE: 7627903.0
+Epoch 1043 MSE: 7627841.5
+Epoch 1044 MSE: 7627781.5
+Epoch 1045 MSE: 7627719.5
+Epoch 1046 MSE: 7627659.0
+Epoch 1047 MSE: 7627602.0
+Epoch 1048 MSE: 7627544.5
+Epoch 1049 MSE: 7627487.0
+Epoch 1050 MSE: 7627428.5
+Epoch 1051 MSE: 7627369.5
+Epoch 1052 MSE: 7627312.0
+Epoch 1053 MSE: 7627252.5
+Epoch 1054 MSE: 7627194.0
+Epoch 1055 MSE: 7627133.5
+Epoch 1056 MSE: 7627074.5
+Epoch 1057 MSE: 7627015.0
+Epoch 1058 MSE: 7626958.0
+Epoch 1059 MSE: 7626901.5
+Epoch 1060 MSE: 7626842.5
+Epoch 1061 MSE: 7626783.5
+Epoch 1062 MSE: 7626725.5
+Epoch 1063 MSE: 7626666.0
+Epoch 1064 MSE: 7626607.5
+Epoch 1065 MSE: 7626549.0
+Epoch 1066 MSE: 7626491.5
+Epoch 1067 MSE: 7626436.5
+Epoch 1068 MSE: 7626381.5
+Epoch 1069 MSE: 7626326.5
+Epoch 1070 MSE: 7626269.5
+Epoch 1071 MSE: 7626213.0
+Epoch 1072 MSE: 7626156.0
+Epoch 1073 MSE: 7626100.0
+Epoch 1074 MSE: 7626048.0
+Epoch 1075 MSE: 7625993.0
+Epoch 1076 MSE: 7625939.5
+Epoch 1077 MSE: 7625885.5
+Epoch 1078 MSE: 7625832.0
+Epoch 1079 MSE: 7625778.0
+Epoch 1080 MSE: 7625725.5
+Epoch 1081 MSE: 7625672.5
+Epoch 1082 MSE: 7625621.0
+Epoch 1083 MSE: 7625569.5
+Epoch 1084 MSE: 7625519.0
+Epoch 1085 MSE: 7625468.5
+Epoch 1086 MSE: 7625418.5
+Epoch 1087 MSE: 7625371.0
+Epoch 1088 MSE: 7625322.0
+Epoch 1089 MSE: 7625272.5
+Epoch 1090 MSE: 7625222.0
+Epoch 1091 MSE: 7625173.0
+Epoch 1092 MSE: 7625123.5
+Epoch 1093 MSE: 7625075.5
+Epoch 1094 MSE: 7625027.5
+Epoch 1095 MSE: 7624979.5
+Epoch 1096 MSE: 7624931.5
+Epoch 1097 MSE: 7624884.5
+Epoch 1098 MSE: 7624837.5
+Epoch 1099 MSE: 7624789.5
+Epoch 1100 MSE: 7624742.0
+Epoch 1101 MSE: 7624692.0
+Epoch 1102 MSE: 7624644.0
+Epoch 1103 MSE: 7624596.5
+Epoch 1104 MSE: 7624548.5
+Epoch 1105 MSE: 7624501.5
+Epoch 1106 MSE: 7624454.5
+Epoch 1107 MSE: 7624408.0
+Epoch 1108 MSE: 7624361.0
+Epoch 1109 MSE: 7624314.0
+Epoch 1110 MSE: 7624269.0
+Epoch 1111 MSE: 7624224.5
+Epoch 1112 MSE: 7624181.0
+Epoch 1113 MSE: 7624137.5
+Epoch 1114 MSE: 7624095.0
+Epoch 1115 MSE: 7624051.5
+Epoch 1116 MSE: 7624008.0
+Epoch 1117 MSE: 7623964.5
+Epoch 1118 MSE: 7623922.0
+Epoch 1119 MSE: 7623879.5
+Epoch 1120 MSE: 7623836.0
+Epoch 1121 MSE: 7623793.5
+Epoch 1122 MSE: 7623751.5
+Epoch 1123 MSE: 7623710.0
+Epoch 1124 MSE: 7623667.5
+Epoch 1125 MSE: 7623625.5
+Epoch 1126 MSE: 7623585.0
+Epoch 1127 MSE: 7623544.0
+Epoch 1128 MSE: 7623503.0
+Epoch 1129 MSE: 7623462.5
+Epoch 1130 MSE: 7623421.5
+Epoch 1131 MSE: 7623382.5
+Epoch 1132 MSE: 7623341.5
+Epoch 1133 MSE: 7623300.0
+Epoch 1134 MSE: 7623257.5
+Epoch 1135 MSE: 7623215.0
+Epoch 1136 MSE: 7623173.0
+Epoch 1137 MSE: 7623130.5
+Epoch 1138 MSE: 7623088.0
+Epoch 1139 MSE: 7623043.5
+Epoch 1140 MSE: 7622997.5
+Epoch 1141 MSE: 7622954.0
+Epoch 1142 MSE: 7622908.5
+Epoch 1143 MSE: 7622859.0
+Epoch 1144 MSE: 7622806.0
+Epoch 1145 MSE: 7622752.5
+Epoch 1146 MSE: 7622698.5
+Epoch 1147 MSE: 7622643.5
+Epoch 1148 MSE: 7622594.0
+Epoch 1149 MSE: 7622545.0
+Epoch 1150 MSE: 7622499.0
+Epoch 1151 MSE: 7622451.0
+Epoch 1152 MSE: 7622402.0
+Epoch 1153 MSE: 7622351.5
+Epoch 1154 MSE: 7622302.0
+Epoch 1155 MSE: 7622255.5
+Epoch 1156 MSE: 7622209.5
+Epoch 1157 MSE: 7622158.0
+Epoch 1158 MSE: 7622106.5
+Epoch 1159 MSE: 7622059.0
+Epoch 1160 MSE: 7622010.0
+Epoch 1161 MSE: 7621961.0
+Epoch 1162 MSE: 7621911.5
+Epoch 1163 MSE: 7621862.5
+Epoch 1164 MSE: 7621814.0
+Epoch 1165 MSE: 7621765.0
+Epoch 1166 MSE: 7621716.5
+Epoch 1167 MSE: 7621666.5
+Epoch 1168 MSE: 7621616.0
+Epoch 1169 MSE: 7621566.5
+Epoch 1170 MSE: 7621514.0
+Epoch 1171 MSE: 7621462.5
+Epoch 1172 MSE: 7621410.0
+Epoch 1173 MSE: 7621356.0
+Epoch 1174 MSE: 7621305.5
+Epoch 1175 MSE: 7621254.0
+Epoch 1176 MSE: 7621205.5
+Epoch 1177 MSE: 7621159.0
+Epoch 1178 MSE: 7621109.5
+Epoch 1179 MSE: 7621060.5
+Epoch 1180 MSE: 7621010.0
+Epoch 1181 MSE: 7620957.0
+Epoch 1182 MSE: 7620906.5
+Epoch 1183 MSE: 7620855.0
+Epoch 1184 MSE: 7620803.5
+Epoch 1185 MSE: 7620751.0
+Epoch 1186 MSE: 7620704.0
+Epoch 1187 MSE: 7620657.0
+Epoch 1188 MSE: 7620612.5
+Epoch 1189 MSE: 7620568.0
+Epoch 1190 MSE: 7620522.0
+Epoch 1191 MSE: 7620475.0
+Epoch 1192 MSE: 7620429.0
+Epoch 1193 MSE: 7620382.0
+Epoch 1194 MSE: 7620334.0
+Epoch 1195 MSE: 7620284.5
+Epoch 1196 MSE: 7620236.5
+Epoch 1197 MSE: 7620190.5
+Epoch 1198 MSE: 7620143.5
+Epoch 1199 MSE: 7620096.0
+Epoch 1200 MSE: 7620050.0
+Epoch 1201 MSE: 7620003.0
+Epoch 1202 MSE: 7619956.0
+Epoch 1203 MSE: 7619908.0
+Epoch 1204 MSE: 7619862.0
+Epoch 1205 MSE: 7619812.5
+Epoch 1206 MSE: 7619762.5
+Epoch 1207 MSE: 7619713.0
+Epoch 1208 MSE: 7619663.5
+Epoch 1209 MSE: 7619612.5
+Epoch 1210 MSE: 7619561.0
+Epoch 1211 MSE: 7619508.0
+Epoch 1212 MSE: 7619456.5
+Epoch 1213 MSE: 7619405.0
+Epoch 1214 MSE: 7619356.5
+Epoch 1215 MSE: 7619305.5
+Epoch 1216 MSE: 7619257.0
+Epoch 1217 MSE: 7619207.0
+Epoch 1218 MSE: 7619157.5
+Epoch 1219 MSE: 7619109.0
+Epoch 1220 MSE: 7619059.0
+Epoch 1221 MSE: 7619008.5
+Epoch 1222 MSE: 7618958.0
+Epoch 1223 MSE: 7618905.5
+Epoch 1224 MSE: 7618852.5
+Epoch 1225 MSE: 7618797.5
+Epoch 1226 MSE: 7618744.0
+Epoch 1227 MSE: 7618689.0
+Epoch 1228 MSE: 7618634.0
+Epoch 1229 MSE: 7618579.0
+Epoch 1230 MSE: 7618526.0
+Epoch 1231 MSE: 7618472.5
+Epoch 1232 MSE: 7618417.5
+Epoch 1233 MSE: 7618363.5
+Epoch 1234 MSE: 7618311.0
+Epoch 1235 MSE: 7618256.0
+Epoch 1236 MSE: 7618204.0
+Epoch 1237 MSE: 7618149.5
+Epoch 1238 MSE: 7618094.0
+Epoch 1239 MSE: 7618035.0
+Epoch 1240 MSE: 7617975.0
+Epoch 1241 MSE: 7617913.5
+Epoch 1242 MSE: 7617851.5
+Epoch 1243 MSE: 7617789.5
+Epoch 1244 MSE: 7617729.0
+Epoch 1245 MSE: 7617662.5
+Epoch 1246 MSE: 7617593.5
+Epoch 1247 MSE: 7617528.5
+Epoch 1248 MSE: 7617468.5
+Epoch 1249 MSE: 7617409.5
+Epoch 1250 MSE: 7617349.5
+Epoch 1251 MSE: 7617287.5
+Epoch 1252 MSE: 7617225.0
+Epoch 1253 MSE: 7617163.0
+Epoch 1254 MSE: 7617101.0
+Epoch 1255 MSE: 7617039.0
+Epoch 1256 MSE: 7616976.5
+Epoch 1257 MSE: 7616914.5
+Epoch 1258 MSE: 7616851.0
+Epoch 1259 MSE: 7616789.5
+Epoch 1260 MSE: 7616727.5
+Epoch 1261 MSE: 7616664.5
+Epoch 1262 MSE: 7616609.5
+Epoch 1263 MSE: 7616552.5
+Epoch 1264 MSE: 7616497.0
+Epoch 1265 MSE: 7616443.5
+Epoch 1266 MSE: 7616378.5
+Epoch 1267 MSE: 7616312.0
+Epoch 1268 MSE: 7616241.0
+Epoch 1269 MSE: 7616169.5
+Epoch 1270 MSE: 7616093.0
+Epoch 1271 MSE: 7616021.0
+Epoch 1272 MSE: 7615947.5
+Epoch 1273 MSE: 7615875.5
+Epoch 1274 MSE: 7615802.0
+Epoch 1275 MSE: 7615729.5
+Epoch 1276 MSE: 7615655.0
+Epoch 1277 MSE: 7615580.0
+Epoch 1278 MSE: 7615505.0
+Epoch 1279 MSE: 7615425.0
+Epoch 1280 MSE: 7615347.0
+Epoch 1281 MSE: 7615269.5
+Epoch 1282 MSE: 7615190.0
+Epoch 1283 MSE: 7615112.5
+Epoch 1284 MSE: 7615033.5
+Epoch 1285 MSE: 7614957.5
+Epoch 1286 MSE: 7614897.0
+Epoch 1287 MSE: 7614842.0
+Epoch 1288 MSE: 7614790.5
+Epoch 1289 MSE: 7614726.5
+Epoch 1290 MSE: 7614638.0
+Epoch 1291 MSE: 7614525.5
+Epoch 1292 MSE: 7614395.0
+Epoch 1293 MSE: 7614254.5
+Epoch 1294 MSE: 7614123.5
+Epoch 1295 MSE: 7613999.0
+Epoch 1296 MSE: 7613883.0
+Epoch 1297 MSE: 7613779.0
+Epoch 1298 MSE: 7613687.0
+Epoch 1299 MSE: 7613586.5
+Epoch 1300 MSE: 7613478.5
+Epoch 1301 MSE: 7613368.5
+Epoch 1302 MSE: 7613255.0
+Epoch 1303 MSE: 7613140.5
+Epoch 1304 MSE: 7613027.0
+Epoch 1305 MSE: 7612904.5
+Epoch 1306 MSE: 7612783.5
+Epoch 1307 MSE: 7612653.5
+Epoch 1308 MSE: 7612516.5
+Epoch 1309 MSE: 7612376.5
+Epoch 1310 MSE: 7612232.5
+Epoch 1311 MSE: 7612082.0
+Epoch 1312 MSE: 7611937.5
+Epoch 1313 MSE: 7611796.0
+Epoch 1314 MSE: 7611658.5
+Epoch 1315 MSE: 7611520.5
+Epoch 1316 MSE: 7611380.0
+Epoch 1317 MSE: 7611252.5
+Epoch 1318 MSE: 7611134.5
+Epoch 1319 MSE: 7611009.0
+Epoch 1320 MSE: 7610883.5
+Epoch 1321 MSE: 7610762.5
+Epoch 1322 MSE: 7610655.0
+Epoch 1323 MSE: 7610546.0
+Epoch 1324 MSE: 7610436.0
+Epoch 1325 MSE: 7610305.0
+Epoch 1326 MSE: 7610171.0
+Epoch 1327 MSE: 7610012.0
+Epoch 1328 MSE: 7609831.0
+Epoch 1329 MSE: 7609650.0
+Epoch 1330 MSE: 7609471.0
+Epoch 1331 MSE: 7609302.0
+Epoch 1332 MSE: 7609141.5
+Epoch 1333 MSE: 7608982.0
+Epoch 1334 MSE: 7608823.0
+Epoch 1335 MSE: 7608670.5
+Epoch 1336 MSE: 7608523.0
+Epoch 1337 MSE: 7608381.5
+Epoch 1338 MSE: 7608242.0
+Epoch 1339 MSE: 7608106.0
+Epoch 1340 MSE: 7607968.5
+Epoch 1341 MSE: 7607834.5
+Epoch 1342 MSE: 7607709.5
+Epoch 1343 MSE: 7607604.0
+Epoch 1344 MSE: 7607520.5
+Epoch 1345 MSE: 7607473.0
+Epoch 1346 MSE: 7607470.0
+Epoch 1347 MSE: 7607476.5
+Epoch 1348 MSE: 7607504.5
+Epoch 1349 MSE: 7607455.0
+Epoch 1350 MSE: 7607352.0
+Epoch 1351 MSE: 7607131.0
+Epoch 1352 MSE: 7606859.5
+Epoch 1353 MSE: 7606553.5
+Epoch 1354 MSE: 7606251.0
+Epoch 1355 MSE: 7605993.5
+Epoch 1356 MSE: 7605820.5
+Epoch 1357 MSE: 7605706.5
+Epoch 1358 MSE: 7605640.5
+Epoch 1359 MSE: 7605610.5
+Epoch 1360 MSE: 7605600.5
+Epoch 1361 MSE: 7605576.5
+Epoch 1362 MSE: 7605528.0
+Epoch 1363 MSE: 7605417.0
+Epoch 1364 MSE: 7605262.0
+Epoch 1365 MSE: 7605057.5
+Epoch 1366 MSE: 7604871.5
+Epoch 1367 MSE: 7604706.5
+Epoch 1368 MSE: 7604589.5
+Epoch 1369 MSE: 7604511.0
+Epoch 1370 MSE: 7604474.0
+Epoch 1371 MSE: 7604475.0
+Epoch 1372 MSE: 7604488.0
+Epoch 1373 MSE: 7604521.0
+Epoch 1374 MSE: 7604552.0
+Epoch 1375 MSE: 7604553.0
+Epoch 1376 MSE: 7604523.5
+Epoch 1377 MSE: 7604441.0
+Epoch 1378 MSE: 7604288.5
+Epoch 1379 MSE: 7604121.0
+Epoch 1380 MSE: 7603979.0
+Epoch 1381 MSE: 7603844.0
+Epoch 1382 MSE: 7603739.5
+Epoch 1383 MSE: 7603640.0
+Epoch 1384 MSE: 7603550.5
+Epoch 1385 MSE: 7603496.0
+Epoch 1386 MSE: 7603454.5
+Epoch 1387 MSE: 7603446.5
+Epoch 1388 MSE: 7603487.5
+Epoch 1389 MSE: 7603569.0
+Epoch 1390 MSE: 7603722.5
+Epoch 1391 MSE: 7603878.5
+Epoch 1392 MSE: 7604060.5
+Epoch 1393 MSE: 7604173.0
+Epoch 1394 MSE: 7604284.0
+Epoch 1395 MSE: 7604282.5
+Epoch 1396 MSE: 7604241.5
+Epoch 1397 MSE: 7604074.5
+Epoch 1398 MSE: 7603851.0
+Epoch 1399 MSE: 7603579.5
+Epoch 1400 MSE: 7603345.5
+Epoch 1401 MSE: 7603111.0
+Epoch 1402 MSE: 7602902.0
+Epoch 1403 MSE: 7602713.0
+Epoch 1404 MSE: 7602551.5
+Epoch 1405 MSE: 7602428.0
+Epoch 1406 MSE: 7602352.5
+Epoch 1407 MSE: 7602312.5
+Epoch 1408 MSE: 7602291.5
+Epoch 1409 MSE: 7602290.5
+Epoch 1410 MSE: 7602316.0
+Epoch 1411 MSE: 7602382.5
+Epoch 1412 MSE: 7602516.0
+Epoch 1413 MSE: 7602763.5
+Epoch 1414 MSE: 7603164.5
+Epoch 1415 MSE: 7603844.0
+Epoch 1416 MSE: 7604776.5
+Epoch 1417 MSE: 7606253.5
+Epoch 1418 MSE: 7607916.5
+Epoch 1419 MSE: 7610571.0
+Epoch 1420 MSE: 7612790.0
+Epoch 1421 MSE: 7616666.0
+Epoch 1422 MSE: 7618982.0
+Epoch 1423 MSE: 7623506.0
+Epoch 1424 MSE: 7624396.5
+Epoch 1425 MSE: 7627097.5
+Epoch 1426 MSE: 7623803.0
+Epoch 1427 MSE: 7621134.5
+Epoch 1428 MSE: 7614318.5
+Epoch 1429 MSE: 7609003.0
+Epoch 1430 MSE: 7604554.0
+Epoch 1431 MSE: 7602351.5
+Epoch 1432 MSE: 7601911.5
+Epoch 1433 MSE: 7602800.5
+Epoch 1434 MSE: 7604644.5
+Epoch 1435 MSE: 7606668.0
+Epoch 1436 MSE: 7608667.0
+Epoch 1437 MSE: 7609073.5
+Epoch 1438 MSE: 7608913.5
+Epoch 1439 MSE: 7607222.5
+Epoch 1440 MSE: 7605680.5
+Epoch 1441 MSE: 7603862.5
+Epoch 1442 MSE: 7602417.5
+Epoch 1443 MSE: 7601337.5
+Epoch 1444 MSE: 7600950.0
+Epoch 1445 MSE: 7601231.0
+Epoch 1446 MSE: 7601902.0
+Epoch 1447 MSE: 7602720.0
+Epoch 1448 MSE: 7603365.0
+Epoch 1449 MSE: 7603977.0
+Epoch 1450 MSE: 7604315.0
+Epoch 1451 MSE: 7604600.0
+Epoch 1452 MSE: 7604381.0
+Epoch 1453 MSE: 7604061.5
+Epoch 1454 MSE: 7603387.0
+Epoch 1455 MSE: 7602857.5
+Epoch 1456 MSE: 7602296.0
+Epoch 1457 MSE: 7601830.0
+Epoch 1458 MSE: 7601336.5
+Epoch 1459 MSE: 7600927.0
+Epoch 1460 MSE: 7600620.0
+Epoch 1461 MSE: 7600432.5
+Epoch 1462 MSE: 7600333.0
+Epoch 1463 MSE: 7600254.5
+Epoch 1464 MSE: 7600164.0
+Epoch 1465 MSE: 7600087.5
+Epoch 1466 MSE: 7600034.0
+Epoch 1467 MSE: 7600006.5
+Epoch 1468 MSE: 7599998.0
+Epoch 1469 MSE: 7599986.5
+Epoch 1470 MSE: 7599968.5
+Epoch 1471 MSE: 7599965.0
+Epoch 1472 MSE: 7599981.0
+Epoch 1473 MSE: 7600045.0
+Epoch 1474 MSE: 7600162.0
+Epoch 1475 MSE: 7600362.5
+Epoch 1476 MSE: 7600682.0
+Epoch 1477 MSE: 7601190.5
+Epoch 1478 MSE: 7601993.0
+Epoch 1479 MSE: 7603155.5
+Epoch 1480 MSE: 7605115.5
+Epoch 1481 MSE: 7607701.5
+Epoch 1482 MSE: 7612229.0
+Epoch 1483 MSE: 7617269.5
+Epoch 1484 MSE: 7626631.5
+Epoch 1485 MSE: 7634263.5
+Epoch 1486 MSE: 7649340.0
+Epoch 1487 MSE: 7653549.0
+Epoch 1488 MSE: 7664397.5
+Epoch 1489 MSE: 7651528.0
+Epoch 1490 MSE: 7640619.5
+Epoch 1491 MSE: 7617945.5
+Epoch 1492 MSE: 7603379.0
+Epoch 1493 MSE: 7599605.0
+Epoch 1494 MSE: 7606001.5
+Epoch 1495 MSE: 7616514.5
+Epoch 1496 MSE: 7621100.5
+Epoch 1497 MSE: 7621666.5
+Epoch 1498 MSE: 7612964.5
+Epoch 1499 MSE: 7604796.0
+> 
+> torch <-
++   purrr::map(
++     temp_files,
++     readr::read_csv
++   ) |>
++   dplyr::bind_rows() |>
++   get_performance()
+Rows: 73866 Columns: 3
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+chr (1): population
+dbl (2): .pred, gross_loss
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+Rows: 24623 Columns: 3
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+chr (1): population
+dbl (2): .pred, gross_loss
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+> 
+> fs::file_delete(temp_files)
+> 
+> #### Merge Performance ####
+> 
+> tibble::lst(
++   ols,
++   xgb,
++   gam,
++   nn,
++   torch
++ ) |>
++   dplyr::bind_rows(
++     .id = "model"
++   ) |>
++   dplyr::relocate(
++     population,
++     model,
++     gini,
++     tmr
++   ) |>
++   dplyr::arrange(
++     population != "train",
++     desc(gini)
++   ) |>
++   print(
++     n = Inf
++   ) |>
++   readr::write_csv(
++     here::here("data/performance.csv")
++   )
+# A tibble: 10 × 5
+   population model  gini   tmr  rmse
+   <chr>      <chr> <dbl> <dbl> <dbl>
+ 1 train      xgb   0.622 0.263 2868.
+ 2 train      torch 0.602 0.274 2757.
+ 3 train      nn    0.596 0.262 2771.
+ 4 train      gam   0.585 0.254 2791.
+ 5 train      ols   0.583 0.251 2795.
+ 6 test       xgb   0.598 0.265 2872.
+ 7 test       torch 0.588 0.277 2749.
+ 8 test       nn    0.582 0.273 2761.
+ 9 test       gam   0.577 0.261 2781.
+10 test       ols   0.576 0.256 2783.
+> 
+> tibble::lst(
++   ols = broom::tidy(ols_mod),
++   ols_resid = parsnip::augment(ols_mod, train_test$test[1:1000, ]),
++   xgb = xgb_imp
++ ) |>
++   readr::write_rds(
++     here::here("data/specs.Rds")
++   )
+> 
+> h2o::h2o.shutdown(FALSE)
+> 
+> proc.time()
+   user  system elapsed 
+486.579   4.676 425.678 

@@ -62,6 +62,10 @@ model = torch.nn.Sequential(
   torch.nn.ReLU(),
   torch.nn.Linear(n_hidden, n_hidden),
   torch.nn.ReLU(),
+  torch.nn.Linear(n_hidden, n_hidden),
+  torch.nn.ReLU(),
+  torch.nn.Linear(n_hidden, n_hidden),
+  torch.nn.ReLU(),
   torch.nn.Linear(n_hidden, 1)
 )
 
