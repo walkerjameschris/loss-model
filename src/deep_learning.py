@@ -9,16 +9,25 @@ import torch
 import numpy as np
 import pandas as pd
 
+torch.manual_seed(12345)
+
 with open('src/dials.yaml', 'r') as file:
   dials = yaml.safe_load(file)
 
 train = pd.read_csv('train')
 test = pd.read_csv('test')
 
-loss_rate = dials['torch_rate']
+learn_rate = dials['torch_rate']
 n_epochs = dials['torch_epochs']
 n_hidden = dials['torch_hidden']
+dropout = dials['torch_dropout']
 target = 'gross_loss'
+
+def to_numpy(x):
+  
+  # Make a copy, detach, and convert
+  x = x.clone().detach()
+  return x.numpy().reshape(-1)
 
 def to_tensor(x):
   
@@ -34,12 +43,33 @@ def to_tensor(x):
 def to_disk(x, y, label):
   
   data = pd.DataFrame({
-    ".pred": x.detach().reshape(-1).numpy(),
-    "gross_loss": y.reshape(-1).numpy(),
+    ".pred": to_numpy(x),
+    "gross_loss": to_numpy(y),
     "population": label
   })
   
   data.to_csv(label, index=False)
+  
+def get_tmr(pred, real):
+  
+  # Convert to NumPy
+  real = to_numpy(real)
+  pred = to_numpy(pred)
+  
+  # Determine ranks
+  real = real >= np.percentile(real, 95)
+  pred = pred >= np.percentile(pred, 95)
+  
+  # Compute match
+  return round(100 * sum(real * pred) / sum(real), 2)
+
+def load_data(x, y, prop=0.2):
+  
+  # Sample some proportion of X
+  n = len(X_train)
+  index = torch.randint(n, (int(n * prop), ))
+  
+  return x[index], y[index]
 
 #### Convert to Tensors ####
 
@@ -64,24 +94,30 @@ model = torch.nn.Sequential(
   torch.nn.ReLU(),
   torch.nn.Linear(n_hidden, n_hidden),
   torch.nn.ReLU(),
-  torch.nn.Linear(n_hidden, n_hidden),
-  torch.nn.ReLU(),
-  torch.nn.Linear(n_hidden, 1)
+  torch.nn.Linear(n_hidden, 1),
+  torch.nn.Dropout(dropout)
 )
 
 # MSE loss is common for regression
 loss_fn = torch.nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=loss_rate)
+optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
 
 for epoch in range(n_epochs):
   
   # Switch to train mode and compute loss
   model.train()
-  y_pred = model(X_train)
-  loss = loss_fn(y_pred, y_train)
+  
+  # Use dataloader
+  x, y = load_data(X_train, y_train)
+  
+  y_pred = model(x)
+  loss = loss_fn(y_pred, y)
   
   # Epoch loss report
-  print(f"Epoch {epoch} MSE: {loss}")
+  if epoch % 100 == 0:
+    epoch = str(epoch).zfill(len(str(n_epochs)))
+    tmr = get_tmr(model(X_train), y_train)
+    print(f"Epoch: {epoch} MSE: {loss} TMR: {tmr}")
   
   # Zero gradients, backpropagate, and tune
   optimizer.zero_grad()

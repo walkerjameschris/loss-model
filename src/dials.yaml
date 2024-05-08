@@ -119,6 +119,7 @@ nn_epochs: 10
 nn_nodes: 5
 
 # Final Torch params
-torch_epochs: 1500
-torch_rate: 0.1
-torch_hidden: 15
+torch_epochs: 3000
+torch_rate: 0.01
+torch_hidden: 30
+torch_dropout: 0.0
