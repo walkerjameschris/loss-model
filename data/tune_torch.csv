@@ -1,2 +1,13 @@
 n_hidden,dropout,active_fn,tmr
-5,0,ReLU,24.47
+5,0.0,ReLU,24.47
+5,0.0,LeakyReLU,26.5
+5,0.2,ReLU,24.55
+5,0.2,LeakyReLU,25.55
+10,0.0,ReLU,25.64
+10,0.0,LeakyReLU,27.13
+10,0.2,ReLU,26.48
+10,0.2,LeakyReLU,25.72
+20,0.0,ReLU,26.96
+20,0.0,LeakyReLU,27.26
+20,0.2,ReLU,26.96
+20,0.2,LeakyReLU,27.02
