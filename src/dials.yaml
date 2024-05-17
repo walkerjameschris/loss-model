@@ -125,6 +125,6 @@ mlp_epochs: 10
 mlp_nodes: 5
 
 # Final Torch params
-torch_fun: "LeakyReLU"
+torch_fun: "ReLU"
 torch_hidden: 30
 torch_dropout: 0.0

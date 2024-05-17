@@ -314,5 +314,3 @@ tibble::lst(
   readr::write_rds(
     here::here("data/specs.Rds")
   )
-
-h2o::h2o.shutdown(FALSE)

@@ -49,8 +49,7 @@ if tune:
 
   for n, d, a in product(num_hidden, dropout, active_fn):
 
-    fun = utils.get_active(a)
-    model = utils.fit_model(X_train, y_train, n, d, fun)
+    model = utils.fit_model(X_train, y_train, n, d, a)
     tmr = utils.get_tmr(model(X_train), y_train)
 
     hide_log.append(n)
@@ -72,7 +71,7 @@ model = utils.fit_model(
   y_train,
   n_hidden,
   dropout_pct,
-  utils.get_active(active_fun)
+  active_fun
 )
 
 # Save out to disk

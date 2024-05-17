@@ -71,7 +71,13 @@ def fit_model(X_train,
               n_epochs=3000):
   '''Common utility for fitting a PyTorch model'''
 
+  print(
+    f'\nFitting Model: {n_hidden} Hidden,',
+    f'{dropout} Drop Rate, {active_fn}\n'
+  )
+
   _, n_predictors = X_train.shape
+  active_fn = get_active(active_fn)
 
   model = torch.nn.Sequential(
     torch.nn.Linear(n_predictors, n_hidden),
@@ -95,9 +101,10 @@ def fit_model(X_train,
     y_pred = model(x)
     loss = loss_fn(y_pred, y)
     
-    if epoch % 100 == 0:
+    if epoch % 500 == 0:
       tmr = get_tmr(model(X_train), y_train)
-      print(f'Epoch: {epoch} MSE: {loss} TMR: {tmr}')
+      epoch = str(epoch).zfill(len(str(n_epochs)))
+      print(f'Epoch: {epoch} TMR: {tmr}')
     
     optimizer.zero_grad()
     loss.backward()
