@@ -115,8 +115,8 @@ xgb_rate: 0.1
 xgb_rounds: 20
 
 # Final Neural Net params
-nn_epochs: 10
-nn_nodes: 5
+mlp_epochs: 10
+mlp_nodes: 5
 
 # Final Torch params
 torch_epochs: 3000

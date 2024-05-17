@@ -5,12 +5,12 @@
 
 # Estimates many variants of a loss model
 
-library(xgboost)
+library(withr)
+library(purrr)
 library(readr)
 library(dplyr)
-library(h2o)
-library(mgcv)
 library(agua)
+library(xgboost)
 library(tidymodels)
 
 source(here::here("src/functions.R"))
@@ -178,23 +178,9 @@ xgb_imp <-
   tibble::as_tibble() |>
   dplyr::rename_all(tolower)
 
-#### GAM ####
-
-gam_mod <-
-  workflows::workflow(
-    preprocessor = model_rec
-  ) |>
-  workflows::add_model(
-    spec = parsnip::gen_additive_mod("regression"),
-    formula = gam_formula(model_rec)
-  ) |>
-  parsnip::fit(train_test$train)
-
-gam <- evaluate(gam_mod, train_test)
-
 #### Neural Network ####
 
-nn_rec <-
+mlp_rec <-
   recipes::step_normalize(
     recipe = model_rec,
     fico, dti, cltv
@@ -202,13 +188,13 @@ nn_rec <-
 
 h2o::h2o.init()
 
-nn_grid <-
+mlp_grid <-
   tidyr::expand_grid(
     hidden_units = dials$hidden_units,
     epochs = dials$epochs
   )
 
-nn_wflow <-
+mlp_wflow <-
   parsnip::mlp(
     mode = "regression",
     hidden_units = tune::tune(),
@@ -221,43 +207,43 @@ nn_wflow <-
     seed = 2468
   ) |>
   workflows::workflow(
-    preprocessor = nn_rec,
+    preprocessor = mlp_rec,
     spec = _
   )
 
 if (dials$tune_net) {
     
   tune::tune_grid(
-    object = nn_wflow,
+    object = mlp_wflow,
     resamples = bootstrap_data,
     metrics = metric_bundle,
-    grid = nn_grid,
+    grid = mlp_grid,
     control = tune::control_grid(verbose = TRUE)
   ) |>
     tune::collect_metrics() |>
     dplyr::select(
-      dplyr::all_of(names(nn_grid)),
+      dplyr::all_of(names(mlp_grid)),
       metric = .metric,
       mean
     ) |>
     readr::write_csv(
-      here::here("data/tune_nn.csv")
+      here::here("data/tune_mlp.csv")
     )
 
 }
 
-nn_mod <-
+mlp_mod <-
   list(
-    hidden_units = dials$nn_nodes,
-    epochs = dials$nn_epochs
+    hidden_units = dials$mlp_nodes,
+    epochs = dials$mlp_epochs
   ) |>
   tune::finalize_workflow(
-    x = nn_wflow,
+    x = mlp_wflow,
     parameters = _
   ) |>
   parsnip::fit(train_test$train)
 
-nn <- evaluate(nn_mod, train_test)
+mlp <- evaluate(mlp_mod, train_test)
 
 #### Deep Learning with Python and Torch ####
 
@@ -268,7 +254,7 @@ temp_files <-
     temp_path <- here::here(i)
     
     recipes::bake(
-      object = recipes::prep(nn_rec),
+      object = recipes::prep(mlp_rec),
       new_data = data
     ) |>
       readr::write_csv(temp_path)
@@ -276,7 +262,7 @@ temp_files <-
     temp_path
   })
 
-reticulate::use_virtualenv()
+reticulate::use_condaenv("~/anaconda3")
 
 reticulate::py_run_file(
   here::here("src/deep_learning.py")
@@ -297,8 +283,7 @@ fs::file_delete(temp_files)
 tibble::lst(
   ols,
   xgb,
-  gam,
-  nn,
+  mlp,
   torch
 ) |>
   dplyr::bind_rows(
