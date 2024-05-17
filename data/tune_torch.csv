@@ -1,0 +1,2 @@
+n_hidden,dropout,active_fn,tmr
+5,0,ReLU,24.47

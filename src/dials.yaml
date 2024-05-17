@@ -99,15 +99,21 @@ tree_depth: [24, 12, 6]
 learn_rate: [0.1, 0.3]
 trees: [40, 20, 10]
 
-# Neural Net params
+# MLP params
 epochs: [10, 15]
 hidden_units: [5, 10, 20]
+
+# Torch Params
+num_hidden: [5, 10, 20]
+dropout: [0, 0.2]
+active_fn: ["ReLU", "LeakyReLU"]
 
 # Toggles for MARS and XGB tuning
 run_stable: FALSE
 run_mars: FALSE
 tune_xgb: FALSE
-tune_net: FALSE
+tune_mlp: FALSE
+tune_torch: TRUE
 
 # Final XGB params
 xgb_depth: 6
@@ -119,7 +125,6 @@ mlp_epochs: 10
 mlp_nodes: 5
 
 # Final Torch params
-torch_epochs: 3000
-torch_rate: 0.01
+torch_fun: "ReLU"
 torch_hidden: 30
 torch_dropout: 0.0

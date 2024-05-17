@@ -5,21 +5,22 @@
 
 import yaml
 import utils
+from itertools import product
 import numpy as np
 import pandas as pd
 import torch
 
 torch.manual_seed(12345)
 
-dials = utils.load_yaml('src/dials.yaml', 'r')
+dials = utils.load_yaml('src/dials.yaml')
 
 train = pd.read_csv('train')
 test = pd.read_csv('test')
 
-learn_rate = dials['torch_rate']
-n_epochs = dials['torch_epochs']
+active_fun = dials['torch_fun']
 n_hidden = dials['torch_hidden']
-dropout = dials['torch_dropout']
+dropout_pct = dials['torch_dropout']
+tune = dials['tune_torch']
 target = 'gross_loss'
 
 #### Convert to Tensors ####
@@ -33,49 +34,46 @@ test = test.drop(columns=target)
 X_train = utils.to_tensor(train.values)
 X_test = utils.to_tensor(test.values)
 
-_, n_predictors = X_train.shape
+#### Tune the Model ####
 
-#### Define the Model ####
+if tune:
 
-# Define neural network with hidden layers
-model = torch.nn.Sequential(
-  torch.nn.Linear(n_predictors, n_hidden),
-  torch.nn.ReLU(),
-  torch.nn.Linear(n_hidden, n_hidden),
-  torch.nn.ReLU(),
-  torch.nn.Linear(n_hidden, n_hidden),
-  torch.nn.ReLU(),
-  torch.nn.Linear(n_hidden, 1),
-  torch.nn.Dropout(dropout)
-)
+  num_hidden = dials['num_hidden']
+  dropout = dials['dropout']
+  active_fn = dials['active_fn']
 
-# MSE loss is common for regression
-loss_fn = torch.nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
+  hide_log = []
+  drop_log = []
+  active_log = []
+  tmr_log = []
 
-for epoch in range(n_epochs):
-  
-  # Switch to train mode and compute loss
-  model.train()
-  
-  # Use dataloader
-  x, y = utils.load_data(X_train, y_train)
-  
-  y_pred = model(x)
-  loss = loss_fn(y_pred, y)
-  
-  # Epoch loss report
-  if epoch % 100 == 0:
-    epoch = str(epoch).zfill(len(str(n_epochs)))
+  for n, d, a in product(num_hidden, dropout, active_fn):
+
+    fun = utils.get_active(a)
+    model = utils.fit_model(X_train, y_train, n, d, fun)
     tmr = utils.get_tmr(model(X_train), y_train)
-    print(f'Epoch: {epoch} MSE: {loss} TMR: {tmr}')
-  
-  # Zero gradients, backpropagate, and tune
-  optimizer.zero_grad()
-  loss.backward()
-  optimizer.step()
-  
-  model.eval()
+
+    hide_log.append(n)
+    drop_log.append(d)
+    active_log.append(a)
+    tmr_log.append(tmr)
+
+  pd.DataFrame({
+    'n_hidden': hide_log,
+    'dropout': drop_log,
+    'active_fn': active_log,
+    'tmr': tmr_log
+  }).to_csv('data/tune_torch.csv', index=False)
+
+#### Fit and Save ####
+
+model = utils.fit_model(
+  X_train,
+  y_train,
+  n_hidden,
+  dropout_pct,
+  utils.get_active(active_fun)
+)
 
 # Save out to disk
 utils.to_disk(model(X_train), y_train, 'train')

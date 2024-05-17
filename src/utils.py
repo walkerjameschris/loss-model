@@ -49,7 +49,60 @@ def get_tmr(pred, real):
 def load_data(x, y, prop=0.2):
   '''Sampling dataloader utility'''
   
-  n = len(X_train)
+  n = len(x)
   index = torch.randint(n, (int(n * prop), ))
   
   return x[index], y[index]
+
+def get_active(x):
+  '''Gets PyTorch activations'''
+
+  if x == "ReLU":
+    return torch.nn.ReLU()
+  if x == "LeakyReLU":
+    return torch.nn.LeakyReLU()
+
+def fit_model(X_train,
+              y_train,
+              n_hidden,
+              dropout,
+              active_fn,
+              learn_rate=0.01,
+              n_epochs=3000):
+  '''Common utility for fitting a PyTorch model'''
+
+  _, n_predictors = X_train.shape
+
+  model = torch.nn.Sequential(
+    torch.nn.Linear(n_predictors, n_hidden),
+    active_fn,
+    torch.nn.Linear(n_hidden, n_hidden),
+    active_fn,
+    torch.nn.Linear(n_hidden, n_hidden),
+    active_fn,
+    torch.nn.Linear(n_hidden, 1),
+    torch.nn.Dropout(dropout)
+  )
+
+  loss_fn = torch.nn.MSELoss()
+  optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
+
+  for epoch in range(n_epochs):
+    
+    model.train()
+    x, y = load_data(X_train, y_train)
+    
+    y_pred = model(x)
+    loss = loss_fn(y_pred, y)
+    
+    if epoch % 100 == 0:
+      tmr = get_tmr(model(X_train), y_train)
+      print(f'Epoch: {epoch} MSE: {loss} TMR: {tmr}')
+    
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    
+    model.eval()
+  
+  return model

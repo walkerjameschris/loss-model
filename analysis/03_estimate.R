@@ -211,7 +211,7 @@ mlp_wflow <-
     spec = _
   )
 
-if (dials$tune_net) {
+if (dials$tune_mlp) {
     
   tune::tune_grid(
     object = mlp_wflow,
@@ -308,7 +308,7 @@ tibble::lst(
 
 tibble::lst(
   ols = broom::tidy(ols_mod),
-  ols_resid = parsnip::augment(ols_mod, train_test$test[1:1000, ]),
+  ols_resid = parsnip::augment(ols_mod, head(train_test$test, 1000)),
   xgb = xgb_imp
 ) |>
   readr::write_rds(
