@@ -11,6 +11,7 @@ def load_yaml(x):
 
 def to_numpy(x):
   '''Detaches a tensor and converts to NumPy'''
+
   return x.clone().detach().numpy().reshape(-1)
 
 def to_tensor(x):
@@ -80,14 +81,14 @@ def fit_model(X_train,
   active_fn = get_active(active_fn)
 
   model = torch.nn.Sequential(
+    torch.nn.Dropout(dropout),
     torch.nn.Linear(n_predictors, n_hidden),
     active_fn,
     torch.nn.Linear(n_hidden, n_hidden),
     active_fn,
     torch.nn.Linear(n_hidden, n_hidden),
     active_fn,
-    torch.nn.Linear(n_hidden, 1),
-    torch.nn.Dropout(dropout)
+    torch.nn.Linear(n_hidden, 1)
   )
 
   loss_fn = torch.nn.MSELoss()
