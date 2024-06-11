@@ -186,7 +186,7 @@ mlp_rec <-
     fico, dti, cltv
   )
 
-h2o::h2o.init()
+agua::h2o_start()
 
 mlp_grid <-
   tidyr::expand_grid(
@@ -261,8 +261,6 @@ temp_files <-
     
     temp_path
   })
-
-reticulate::use_condaenv("~/anaconda3")
 
 reticulate::py_run_file(
   here::here("src/deep_learning.py")

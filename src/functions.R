@@ -114,7 +114,7 @@ tmr.data.frame <- function(data,
   )
 }
 
-metric_bundle <- yardstick::metric_set(gini, tmr, rmse)
+metric_bundle <- yardstick::metric_set(gini, tmr, yardstick::rmse)
 
 get_performance <- function(data,
                             pred = .pred,
@@ -198,9 +198,10 @@ theme_plot <- function() {
   ggplot2::theme_minimal() +
     ggplot2::theme(
       legend.position = "top",
-      text = ggplot2::element_text(family = "Noto Serif"),
+      text = ggplot2::element_text(size = 60),
       plot.title = ggplot2::element_text(face = "bold"),
-      legend.title = ggplot2::element_blank()
+      legend.title = ggplot2::element_blank(),
+      panel.background = ggplot2::element_blank()
     )
 }
 

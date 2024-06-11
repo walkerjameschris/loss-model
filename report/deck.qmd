@@ -1,0 +1,182 @@
+---
+title: "Predicting Loan Level Loss"
+subtitle: "An Exploration of Machine Learning Methods"
+format: clean-revealjs
+author: "Chris Walker"
+date: last-modified
+---
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+
+source(here::here("src/functions.R"))
+
+train_test <-
+  readr::read_rds(
+    here::here("data/train_test.Rds")
+  )
+
+stability <-
+  readr::read_csv(
+    here::here("data/stability.csv")
+  )
+```
+
+## Introduction
+
+This deck describes the development of a model which compares modeling techniques to predict mortgage losses. The motivations for this project are twofold:
+
+-   Study the relationship between loan application details and losses
+-   Evaluate a range of machine learning methods
+
+Obtaining good estimates of loss is useful for healthy management of the financial system, particularly when losses are estimated early in the mortgage life cycle.
+
+## Data Sources
+
+Data for this project comes courtesy of Freddie Mac's loan level data repository. This data set contains fields like the borrowers' UPB, FICO, CLTV, and DTI when the loan was created. It also includes loan level loss data where a loss is incurred if a loan becomes delinquent for an extended period of time.
+
+This model mimics a credit decision model. Specifically, it leverages loan application characteristics to forecast the amount of loss we might expect in a stress scenario. The output from this model could be used to drive loan approval decisions or used internally to drive risk management targets and decisions.
+
+## Target Variable
+
+::: columns
+::: {.column width="50%"}
+We compute loss as *risk to the financial system*. This means that it is possible to compute the amount of losses incurred by Freddie Mac. For example, losses minus insurance payments. Instead, we computed gross losses incurred by every involved party.
+:::
+
+::: {.column width="50%"}
+Insurance plans, adjustments, and other compensation can reduce the loss experienced by a single financial institution. This model assumes the worst case scenario where the originator would assume all loss.
+:::
+:::
+
+$$
+\text{Gross Loss Bps}=10000\times\frac{\text{Gross Loss}}{\text{Origination UPB}}
+$$
+
+## Independent Variables
+
+::: columns
+::: {.column width="50%"}
+Independent variables include several continuous and categorical factors. FICO, CLTV, and DTI are our continuous predictors whereas geographic region, number of borrowers, occupancy type, property type, and loan purpose are categorical.
+
+The visual on the right shows distributions of the continuous predictors.
+:::
+
+::: {.column width="50%"}
+**Continuous Predictors**
+
+```{r}
+#| fig-height: 9
+
+train_test |>
+  purrr::pluck("train") |>
+  dplyr::select(
+    FICO = fico,
+    DTI = dti,
+    CLTV = cltv
+  ) |>
+  tidyr::pivot_longer(
+    dplyr::everything()
+  ) |>
+  ggplot2::ggplot(
+    ggplot2::aes(value)
+  ) +
+  ggplot2::facet_wrap(
+    ggplot2::vars(name),
+    scales = "free",
+    ncol = 1
+  ) +
+  ggplot2::geom_density(
+    linewidth = 1
+  ) +
+  ggplot2::labs(
+    x = "Value",
+    y = "Density"
+  ) +
+  theme_plot() +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_blank()
+  )
+```
+:::
+:::
+
+## Predictor Stability
+
+::: columns
+::: {.column width="50%"}
+We compute loss as *risk to the financial system*. This means that it is possible to compute the amount of losses incurred by Freddie Mac. For example, losses minus insurance payments. Instead, we computed gross losses incurred by every involved party.
+:::
+
+::: {.column width="50%"}
+**Coefficient Stability**
+
+```{r}
+#| fig-height: 10
+
+coef_df <-
+  stability |>
+  dplyr::filter(
+    term != "(Intercept)"
+  ) |>
+  dplyr::mutate(
+    term = make_nicenames(term),
+    significant = dplyr::if_else(
+      p.value < 0.01,
+      "Significant",
+      "Insignificant"
+    )
+  )
+
+conf_df <-
+  coef_df |>
+  dplyr::group_by(term) |>
+  dplyr::reframe(
+    t_test(estimate)
+  )
+
+coef_df |>
+  ggplot2::ggplot(
+    ggplot2::aes(
+      x = estimate,
+      y = term,
+      color = significant
+    )
+  ) +
+  ggplot2::geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  ggplot2::geom_point(
+    size = 5
+  ) +
+  ggplot2::geom_segment(
+    data = conf_df,
+    inherit.aes = FALSE,
+    linewidth = 1,
+    arrow = ggplot2::arrow(
+      ends = "both",
+      angle = 90,
+      length = ggplot2::unit(0.25, "cm")
+    ),
+    ggplot2::aes(
+      x = lo,
+      xend = hi,
+      y = term,
+      yend = term
+    )
+  ) +
+  ggplot2::labs(
+    x = "Estimate",
+    y = "Term",
+    caption = "Brackets show a 95% CI t-test"
+  ) +
+  theme_plot() +
+  ggthemes::scale_color_tableau(
+    direction = -1
+  )
+```
+:::
+:::
