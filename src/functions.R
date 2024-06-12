@@ -198,7 +198,11 @@ theme_plot <- function() {
   ggplot2::theme_minimal() +
     ggplot2::theme(
       legend.position = "top",
-      text = ggplot2::element_text(size = 50, family = "Source Sans 3"),
+      text = ggplot2::element_text(
+        size = 50,
+        family = "Source Sans 3",
+        color = "#000f2b"
+      ),
       plot.title = ggplot2::element_text(face = "bold"),
       legend.title = ggplot2::element_blank(),
       panel.background = ggplot2::element_blank(),

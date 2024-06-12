@@ -12,13 +12,17 @@ $presentation-font-size-root: 28px;
   text-align: left;
 }
 
+.reveal h1 {
+  font-weight: bold;
+}
+
 .reveal h2 {
   line-height: 2;
   font-weight: bold;
 }
 
-.reveal h1 {
-  font-weight: bold;
+.reveal h3 {
+  color: #B3A369;
 }
 
 .reveal .slide-number {

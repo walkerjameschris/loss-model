@@ -40,26 +40,53 @@ performance <-
 
 ## Introduction
 
-This deck describes the development of a model which compares modeling techniques to predict mortgage losses. The motivations for this project are twofold:
+This deck describes the development of a model which compares **modeling techniques to predict mortgage losses**. The motivations for this project are twofold:
 
--   Study the relationship between loan application details and losses
--   Evaluate a range of machine learning methods
+-   Study the relationship between **loan application details and losses**
+-   **Evaluate** a range of **machine learning methods**
 
-Obtaining good estimates of loss is useful for healthy management of the financial system, particularly when losses are estimated early in the mortgage life cycle.
+Obtaining good estimates of loss is useful for **healthy management of the financial system**, particularly when losses are estimated early in the mortgage life cycle. The output from this model could be used to drive **loan approval decisions** or used internally to **drive risk management targets** and decisions.
 
 ## Data Sources
 
-Data for this project comes courtesy of Freddie Mac's loan level data repository. This data set contains fields like the borrowers' UPB, FICO, CLTV, and DTI when the loan was created. It also includes loan level loss data where a loss is incurred if a loan becomes delinquent for an extended period of time.
+Data for this project comes courtesy of **Freddie Mac's loan level data repository**. This data set contains fields like the borrowers' **UPB, FICO, CLTV, and DTI** when the loan was created. It also includes loan level **loss data** where a loss is incurred if a loan becomes delinquent for an extended period of time.
 
-This model mimics a credit decision model. Specifically, it leverages loan application characteristics to forecast the amount of loss we might expect in a stress scenario. The output from this model could be used to drive loan approval decisions or used internally to drive risk management targets and decisions.
+```{r}
+train_test |>
+  purrr::pluck("train") |>
+  dplyr::slice_head(
+    n = 5
+  ) |>
+  dplyr::reframe(
+    fico,
+    fthb,
+    one_unit,
+    occupancy,
+    "..." = "...",
+    purpose,
+    term,
+    one_borrower,
+    gross_loss = round(gross_loss)
+  ) |>
+  dplyr::mutate(
+    dplyr::across(
+      !`...`,
+      \(x) dplyr::if_else(
+        dplyr::row_number() == 5,
+        "...", as.character(x)
+      )
+    )
+  ) |>
+  knitr::kable()
+```
 
 ## Target Variable
 
 ::: columns
 ::: {.column width="50%"}
-We compute loss as risk to the financial system. This means that it is possible to compute the amount of losses incurred by Freddie Mac. For example, losses minus insurance payments.
+We compute **loss as risk to the financial system**. This means that it is possible to compute the amount of losses incurred by Freddie Mac. For example, losses minus insurance payments.
 
-Instead, we computed gross losses incurred by every involved party. Insurance plans, adjustments, and other compensation can reduce the loss experienced by a single financial institution.
+Instead, we **computed gross losses incurred by every involved party**. Insurance plans, adjustments, and other compensation can reduce the loss experienced by a single institution.
 
 $$
 \text{Gross Loss Bps}=1e4\times\frac{\text{Gross Loss}}{\text{UPB}}
@@ -79,7 +106,8 @@ train_test |>
   ggplot2::labs(
     x = "Value",
     y = "Density",
-    title = "Distribution of Gross Loss"
+    title = "Distribution of Gross Loss",
+    subtitle = "Using training dataset"
   ) +
   theme_plot() +
   ggplot2::theme(
@@ -93,9 +121,9 @@ train_test |>
 
 ::: columns
 ::: {.column width="50%"}
-Independent variables include several continuous and categorical factors. FICO, CLTV, and DTI are our continuous predictors whereas geographic region, number of borrowers, occupancy type, property type, and loan purpose are categorical.
+The independent variables for this model include **several continuous and categorical factors**. **FICO, CLTV, and DTI** are our continuous predictors whereas geographic region, number of borrowers, occupancy type, property type, and loan purpose are categorical.
 
-The visual on the right shows distributions of the continuous predictors.
+The visual on the right shows **distributions of the continuous predictors**.
 :::
 
 ::: {.column width="50%"}
@@ -124,7 +152,8 @@ train_test |>
   ggplot2::labs(
     x = "Value",
     y = "Density",
-    title = "Continuous Predictors"
+    title = "Continuous Predictors",
+    subtitle = "Using training dataset"
   ) +
   theme_plot() +
   ggplot2::theme(
@@ -138,9 +167,9 @@ train_test |>
 
 ::: columns
 ::: {.column width="50%"}
-Using traditional statistics, we utilized a bootstrapping approach to validate the usefulness of different predictors. Specifically, we resampled our training data 25 times with replacement.
+We utilized a bootstrapping approach to **validate the usefulness of different predictors**. Specifically, we resampled our training data 25 times with replacement.
 
-Using each new sample, we fit a linear model and assess the stability of each coefficient. Most predictors are stable and reveal very tight confidence intervals. However, Term 25yr, Region: NE, and Property: Condo all prove to be unstable and will be excluded from all modeling trials.
+Using each new sample, we **fit a linear model** and assess the **stability of each coefficient**. **Most predictors are stable** and reveal very tight confidence intervals. However, **Term 25yr, Region: NE, and Property: Condo** all prove to be **unstable** and will be excluded from all modeling trials.
 :::
 
 ::: {.column width="50%"}
@@ -202,11 +231,12 @@ coef_df |>
     x = "Estimate",
     y = "Term",
     caption = "Brackets show a 95% CI t-test",
-    title = "Coefficient Stability"
+    title = "Coefficient Stability",
+    subtitle = "by Model Predictor"
   ) +
   theme_plot() +
-  ggthemes::scale_color_tableau(
-    direction = -1
+  ggplot2::scale_color_manual(
+    values = c("#003057", "#B3A369")
   )
 ```
 :::
@@ -216,9 +246,9 @@ coef_df |>
 
 ::: columns
 ::: {.column width="50%"}
-We tested many modeling approaches given that predicting loss is a complex and sometimes non-linear modeling problem. As a result, we tested a wide variety of modeling algorithms of increasing complexity.
+Predicting loss is a complex and sometimes non-linear modeling problem. As a result, we **tested a wide variety of modeling algorithms** of increasing complexity.
 
-The simplest approach (OLS) acts as our control parametric method. From there, we move into machine learning methods including XGB (a boosted decision tree), MLP (a simple one-hidden layer neural network), and finally Torch (a multilayer deep learning network).
+The simplest approach **(OLS) acts as our control parametric method**. We utilized **MARS** to develop linear splines to improve the fit. From there, we move into machine learning methods. These methods are designed to capture more **robust non-linear relationships**.
 :::
 
 ::: {.column width="50%"}
@@ -234,13 +264,33 @@ The interface for these approaches is a mix of `tidymodels` in R and `torch` in 
 :::
 :::
 
+## Perfomance Metrics
+
+::: columns
+::: {.column width="50%"}
+### Tail Match Rate
+
+Tail match rate (TMR) is a measure which measures the percentage of the **highest 5% of gross loss values** which are also in the **5% highest predicted gross loss values**. It is a measure of **rank ordering**. We want to maximize this value.
+
+### Root Mean Squared Error
+
+Root mean squared error (RMSE) measures the **square root of the average squared residual**. It is a measure of **predictive accuracy**. We want to minimize this value.
+
+:::
+::: {.column width="50%"}
+### Gini
+
+Similar to TMR, Gini **is a measure of rank ordering**. Gini first identifies the **highest 5% of gross loss values** (referred to as tail values). Gini is close to **0.00 if tail values are evenly distributed throughout** the range of predicted values. Alternatively, if values are **clustered near the top** of the predicted range **Gini approaches 1.00**. We want to maximize this value.
+:::
+:::
+
 ## Hyperparameter Tuning
 
 ::: columns
 ::: {.column width="50%"}
-While OLS does not require tuning, all other machine learning methods require tuning. A hyperparameter is a model parameter which exists outside of the data itself. Examples for XGB include the max tree depth and learning rate.
+All machine learning methods require tuning. A **hyperparameter** is a model parameter which exists outside of the data itself. Examples for XGB include the **max tree depth and learning rate**.
 
-All three non-linear methods went through a tuning process with a final set of parameters. These parameters were selected through a bootstrapping process which selects the parameter configuration which optimizes performance based on RMSE, Gini, and TMR.
+All three non-OLS methods went through a tuning process with a final set of parameters. These parameters were **selected through a bootstrapping process** optimizing for **RMSE, Gini, and TMR performance**.
 :::
 
 ::: {.column width="50%"}
@@ -263,13 +313,15 @@ tibble::tribble(
 :::
 :::
 
+
+
 ## Model Performance
 
 ::: columns
 ::: {.column width="40%"}
-The table on the right shows the performance results by model type for both the train and test subsets. The rank ordering of performance remains the same between train and test indicating that overfitting is not occurring in an extreme manner.
+The table on the right shows the **performance results by model type**. The ordering of models by performance remains the same between train and test.
 
-Gini is the dominant metric on this table. Using this metric, which represents the rank ordering performance of this model, XGBoost performs the best. However, from a TMR perspective (another rank ordering metric) Torch performs well. Given the time and complexity of fitting a deep learning model with `torch`, I would recommend the XGBoost model as my preferred method. It performs well, handles extreme values, and can even be monotonically constrained.
+**Gini is the dominant metric on this table** where **XGBoost performs the best**. However, from a TMR perspective Torch performs well. **XGBoost is my preferred method** given ease of development.
 :::
 
 ::: {.column width="60%"}
@@ -299,8 +351,16 @@ performance |>
 
 ## What's Left?
 
--   Things
+We plan to add **additional discussion** around two key areas in the final report:
 
--   To
+-   An overview of questions related **modeling theory**:
 
--   Do
+    -   How is an XGBoost model fit?
+
+    -   What advantages to tree based models have on tabular data?
+
+    -   What makes a model a deep learning model?
+
+-   A robust discussion of **model interpretability**, especially for XGBoost given it is our recommended model methodology.
+
+
