@@ -1,0 +1,26 @@
+/*-- scss:defaults --*/
+
+$presentation-h1-font-size:	3em;
+$presentation-h2-font-size: 3em;
+$body-color: #000f2b;
+$presentation-heading-color: #000f2b;
+$presentation-font-size-root: 28px;
+
+/*-- scss:rules --*/
+
+#title-slide {
+  text-align: left;
+}
+
+.reveal h2 {
+  line-height: 2;
+  font-weight: bold;
+}
+
+.reveal h1 {
+  font-weight: bold;
+}
+
+.reveal .slide-number {
+  color: darkgray;
+}

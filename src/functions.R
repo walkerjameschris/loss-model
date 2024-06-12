@@ -198,10 +198,11 @@ theme_plot <- function() {
   ggplot2::theme_minimal() +
     ggplot2::theme(
       legend.position = "top",
-      text = ggplot2::element_text(size = 60),
+      text = ggplot2::element_text(size = 50, family = "Source Sans 3"),
       plot.title = ggplot2::element_text(face = "bold"),
       legend.title = ggplot2::element_blank(),
-      panel.background = ggplot2::element_blank()
+      panel.background = ggplot2::element_blank(),
+      panel.grid = ggplot2::element_line("darkgray")
     )
 }
 
@@ -238,17 +239,16 @@ make_nicenames <- function(x) {
     "dti_gt_37" ~ "DTI > 37",
     
     # Model Types
-    "gam" ~ "Generalized Additive Model",
-    "ols" ~ "Linear Regression",
+    "ols" ~ "Regression",
     "xgb" ~ "XGBoost",
-    "nn" ~ "Neural Network",
+    "mlp" ~ "Neural Network",
     "torch" ~ "Torch",
     
     # Performance columns
     "gini" ~ "Gini",
-    "tmr" ~ "TMR 5%",
+    "tmr" ~ "TMR",
     "rmse" ~ "RMSE",
-    "population" ~ "Population",
+    "population" ~ "Subset",
     "model" ~ "Model",
     
     # Population Labels

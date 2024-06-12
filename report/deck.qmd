@@ -1,9 +1,17 @@
 ---
-title: "Predicting Loan Level Loss"
-subtitle: "An Exploration of Machine Learning Methods"
-format: clean-revealjs
-author: "Chris Walker"
-date: last-modified
+title: "Predicting Loan Level Loss: An Exploration of Methods"
+subtitle: "Christopher Walker"
+format:
+  revealjs:
+    margin: 0
+    logo: "logo.png"
+    theme: ["theme.scss", default]
+    slide-number: "c/t"
+    title-slide-attributes:
+      data-background-image: "logo.png"
+      data-background-opacity: "0.2"
+fig-height: 8
+fig-width: 8
 ---
 
 ```{r}
@@ -11,6 +19,8 @@ library(tidyverse)
 library(tidymodels)
 
 source(here::here("src/functions.R"))
+
+sysfonts::font_add_google("Source Sans 3")
 
 train_test <-
   readr::read_rds(
@@ -20,6 +30,11 @@ train_test <-
 stability <-
   readr::read_csv(
     here::here("data/stability.csv")
+  )
+
+performance <-
+  readr::read_csv(
+    here::here("data/performance.csv")
   )
 ```
 
@@ -42,17 +57,37 @@ This model mimics a credit decision model. Specifically, it leverages loan appli
 
 ::: columns
 ::: {.column width="50%"}
-We compute loss as *risk to the financial system*. This means that it is possible to compute the amount of losses incurred by Freddie Mac. For example, losses minus insurance payments. Instead, we computed gross losses incurred by every involved party.
+We compute loss as risk to the financial system. This means that it is possible to compute the amount of losses incurred by Freddie Mac. For example, losses minus insurance payments.
+
+Instead, we computed gross losses incurred by every involved party. Insurance plans, adjustments, and other compensation can reduce the loss experienced by a single financial institution.
+
+$$
+\text{Gross Loss Bps}=1e4\times\frac{\text{Gross Loss}}{\text{UPB}}
+$$
 :::
 
 ::: {.column width="50%"}
-Insurance plans, adjustments, and other compensation can reduce the loss experienced by a single financial institution. This model assumes the worst case scenario where the originator would assume all loss.
+```{r}
+train_test |>
+  purrr::pluck("train") |>
+  ggplot2::ggplot(
+    ggplot2::aes(gross_loss)
+  ) +
+  ggplot2::geom_density(
+    linewidth = 1
+  ) +
+  ggplot2::labs(
+    x = "Value",
+    y = "Density",
+    title = "Distribution of Gross Loss"
+  ) +
+  theme_plot() +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_blank()
+  )
+```
 :::
 :::
-
-$$
-\text{Gross Loss Bps}=10000\times\frac{\text{Gross Loss}}{\text{Origination UPB}}
-$$
 
 ## Independent Variables
 
@@ -64,11 +99,7 @@ The visual on the right shows distributions of the continuous predictors.
 :::
 
 ::: {.column width="50%"}
-**Continuous Predictors**
-
 ```{r}
-#| fig-height: 9
-
 train_test |>
   purrr::pluck("train") |>
   dplyr::select(
@@ -92,7 +123,8 @@ train_test |>
   ) +
   ggplot2::labs(
     x = "Value",
-    y = "Density"
+    y = "Density",
+    title = "Continuous Predictors"
   ) +
   theme_plot() +
   ggplot2::theme(
@@ -106,15 +138,13 @@ train_test |>
 
 ::: columns
 ::: {.column width="50%"}
-We compute loss as *risk to the financial system*. This means that it is possible to compute the amount of losses incurred by Freddie Mac. For example, losses minus insurance payments. Instead, we computed gross losses incurred by every involved party.
+Using traditional statistics, we utilized a bootstrapping approach to validate the usefulness of different predictors. Specifically, we resampled our training data 25 times with replacement.
+
+Using each new sample, we fit a linear model and assess the stability of each coefficient. Most predictors are stable and reveal very tight confidence intervals. However, Term 25yr, Region: NE, and Property: Condo all prove to be unstable and will be excluded from all modeling trials.
 :::
 
 ::: {.column width="50%"}
-**Coefficient Stability**
-
 ```{r}
-#| fig-height: 10
-
 coef_df <-
   stability |>
   dplyr::filter(
@@ -171,7 +201,8 @@ coef_df |>
   ggplot2::labs(
     x = "Estimate",
     y = "Term",
-    caption = "Brackets show a 95% CI t-test"
+    caption = "Brackets show a 95% CI t-test",
+    title = "Coefficient Stability"
   ) +
   theme_plot() +
   ggthemes::scale_color_tableau(
@@ -180,3 +211,96 @@ coef_df |>
 ```
 :::
 :::
+
+## Modeling Approaches
+
+::: columns
+::: {.column width="50%"}
+We tested many modeling approaches given that predicting loss is a complex and sometimes non-linear modeling problem. As a result, we tested a wide variety of modeling algorithms of increasing complexity.
+
+The simplest approach (OLS) acts as our control parametric method. From there, we move into machine learning methods including XGB (a boosted decision tree), MLP (a simple one-hidden layer neural network), and finally Torch (a multilayer deep learning network).
+:::
+
+::: {.column width="50%"}
+The interface for these approaches is a mix of `tidymodels` in R and `torch` in Python. The approaches tried so far are:
+
+-   Linear Regression (OLS)
+
+-   XGBoost (XGB)
+
+-   Multilayer Perception (MLP)
+
+-   PyTorch (Torch)
+:::
+:::
+
+## Hyperparameter Tuning
+
+::: columns
+::: {.column width="50%"}
+While OLS does not require tuning, all other machine learning methods require tuning. A hyperparameter is a model parameter which exists outside of the data itself. Examples for XGB include the max tree depth and learning rate.
+
+All three non-linear methods went through a tuning process with a final set of parameters. These parameters were selected through a bootstrapping process which selects the parameter configuration which optimizes performance based on RMSE, Gini, and TMR.
+:::
+
+::: {.column width="50%"}
+```{r}
+params <- purrr::map(dials, as.character)
+
+tibble::tribble(
+  ~ Model, ~ Parameter, ~ Value,
+  "XGB", "Max Depth", params$xgb_depth,
+  "XGB", "Learn Rate", params$xgb_rate,
+  "XGB", "Trees", params$xgb_rounds,
+  "MLP", "Epochs", params$mlp_epochs,
+  "MLP", "Hidden Nodes", params$mlp_nodes,
+  "Torch", "Activation", params$torch_fun,
+  "Torch", "Hidden Nodes", params$torch_hidden,
+  "Torch", "Dropout Rate", params$torch_dropout
+) |>
+  knitr::kable()
+```
+:::
+:::
+
+## Model Performance
+
+::: columns
+::: {.column width="40%"}
+The table on the right shows the performance results by model type for both the train and test subsets. The rank ordering of performance remains the same between train and test indicating that overfitting is not occurring in an extreme manner.
+
+Gini is the dominant metric on this table. Using this metric, which represents the rank ordering performance of this model, XGBoost performs the best. However, from a TMR perspective (another rank ordering metric) Torch performs well. Given the time and complexity of fitting a deep learning model with `torch`, I would recommend the XGBoost model as my preferred method. It performs well, handles extreme values, and can even be monotonically constrained.
+:::
+
+::: {.column width="60%"}
+```{r}
+performance |>
+  dplyr::mutate(
+    
+    # Prepare titles
+    dplyr::across(
+      c(population, model),
+      make_nicenames
+    ),
+    
+    gini = round(gini, 2),
+    tmr = scales::label_percent(0.1)(tmr),
+    rmse = round(rmse)
+
+  ) |>
+  dplyr::rename_with(
+    make_nicenames
+  ) |>
+  knitr::kable()
+  
+```
+:::
+:::
+
+## What's Left?
+
+-   Things
+
+-   To
+
+-   Do
