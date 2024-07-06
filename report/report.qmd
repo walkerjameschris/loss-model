@@ -448,6 +448,16 @@ decision tree trying to predict these residuals using available predictors. If
 the model has a good understanding of residuals, then we can understand sources
 of variance in the response!
 
+XGBoost uses something called Similarity Score to determine which variable and
+at which point along the variable (if it is continuous) produces clusters of
+data that are the most similar. After all, tree based models aim to bucket
+similar data together. Sufficiently similar data will get a representative
+prediction. A similarity score is computed as:
+
+$$
+\text{Similarity} = \frac{(\sum{\hat{y}-{y}})^2}{\text{Number of Residuals}}
+$$
+
 To prevent overfitting, XGBoost controls the impact of each tree with a learning
 rate and a shrinkage parameter. This reduces the impact of any single tree in the
 series and works to prevent overfitting or rote memorization of the training data.
@@ -517,7 +527,100 @@ specs$xgb |>
 
 ### Background
 
+The final model type we explored is a deep learning model estimted in
+Python using `torch`. A deep learning model is simply a neural network
+of sufficient depth (typically two or more hidden layers). Models of
+this type can be built to solve extremely complex learning problems
+including computer vision, language modeling, and more. However, they
+can still be applied to more traditional predictive applications like
+this loss model.
+
+A deep learning model for regression is a series of interconnected
+processing units. Each unit receives data (inputs) representing features,
+multiplies them by weights (learned values similar to regression coefficients),
+and sums them up. This sum is then passed through an activation function.
+The activation function decides how much influence each unit's calculation
+has on the final output. Common choices in regression include the ReLU function,
+which allows positive values to pass through unchanged, and zeroes out negative
+ones. This adds non-linearity, enabling the model to capture complex
+relationships.
+
+With many interconnected units across multiple layers, each performing this
+calculation with its own weights and activation function, the deep learning
+model builds a complex web of influences. By comparing the model's predictions
+with actual data and adjusting the weights based on errors (backpropagation),
+the model learns to transform the initial inputs into accurate predictions
+for a target variable.
+
 ### Estimation
+
+Our deep learning model, like XGBoost, needs to be tuned to optimize performance.
+We tuned a total of three parameters each hoping to better the overall regression
+capability of the model. The parameters are:
+
+`num_hidden`: The number of hidden nodes in each of the three hidden layers.
+`dropout`: The share of randomly zeroed inputs (to prevent overfitting).
+`active_fn`: The activation function used (ReLU vs LeakyReLU)
+
+Similar to the XGB tune, we utilized default values from `tidymodels` to initialize
+our tuning. For `num_hidden` we tried 10, 20, and 30 whereas we tried 0% and 20% for
+the number of randomly dropped inputs. Both of these parameters are designed to control
+for overfitting of the model. Models with less dropout and more hidden layers will
+fit the training data well but likely overfit and perform poorly on the testing data.
+
+We also tested ReLU vs LeakyReLU as our activation function. As discussed above, these
+functions introduce non-linearity intto the model to allow for complex relationships.
+The weight (or coefficient) simply adjusts the angle between the flat and angled 
+portions of the activation functions. ReLU is a very popular choice because it is
+computationally efficient and simple to implement. The LeakyReLU expands on this 
+idea by adding a slope to the flat portion to prevent exploding or vanishing gradients.
+Exploding or vanishing gradients are two extremes of the same problem - when
+the chain rule fails to properly gradient the data leading to poor backpropagation
+and convergance failures.
+
+```{r, fig.width=5, fig.height=3}
+tibble::tibble(
+  x = c(-1, 0, 1),
+  ReLU = c(0, 0, 1),
+  LeakyReLU = c(-0.1, 0, 1)
+) |>
+  tidyr::pivot_longer(
+    c(ReLU, LeakyReLU)
+  ) |>
+  ggplot2::ggplot(
+    ggplot2::aes(
+      x = x,
+      y = value,
+      color = name
+    )
+  ) +
+  ggplot2::geom_line(
+    linewidth = 1
+  ) +
+  theme_plot()  +
+  ggplot2::labs(
+    title = "Activation Functions",
+    subtitle = "ReLU vs LeakyReLU",
+    x = "X",
+    y = "Y"
+  ) +
+  ggplot2::theme(
+    legend.position = "none"
+  ) +
+  ggplot2::facet_wrap(
+    facets = ggplot2::vars(name)
+  ) +
+  ggthemes::scale_color_tableau(
+    direction = -1
+  )
+```
+
+After a full gamut of testing, we found that ReLU with 30 hidden nodes and 0% dropout
+leads to the best performance. It is also worth noting that deep learning is likely
+over-engineering this problem. Data science is equally about right sizing soulutions
+as it is about learning techniques and in this case a deep learning approach is too
+complex (in terms of the fragility of the model) for the amount of predictors and
+observations used.
 
 # Performance Comparison
 

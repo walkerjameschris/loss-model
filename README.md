@@ -3,9 +3,9 @@
 ## Introduction
 
 A repo containing code to estimate a mortgage loss model using open source loss
-data from the Freddie Mae loan-level mortgage performance data repository. The 
-code base compares machine learning methods ranging from OLS and GAMs to XGBoost
-and Neural Nets.
+data from the Freddie Mac loan-level mortgage performance data repository. The 
+code base compares machine learning methods ranging from OLS and XGBoost
+and Neural Nets with PyTorch.
 
 ## Contents
 
@@ -20,12 +20,14 @@ and Neural Nets.
   - `specs.Rds`: Serialized specs for each model
   - `stability.csv`: A coefficient stability exercise
   - `train_test.Rds`: Train, test, and validate serialized as a list
-  - `tune_nn.csv`: Results of an neural network tuning exercise
+  - `tune_torch.csv`: Results of an neural network tuning exercise
   - `tune_xgb.csv`: Results of an XGB tuning exercise
 - `loss-model.Rproj`: Sets the working directory
 - `report/`
-  - `report.qmd`: Final report as PDF document
+  - `report.pdf`: Final report as PDF document
   - `report.qmd`: Final report as HTML document
 - `src/`
+  - `deep_learning.py`: Uses `torch` to estimate a model
   - `dials.yaml`: Project level settings
   - `functions.R`: Functions used across the codebase
+  - `utils.R`: Functions used in Python portions of the codebase

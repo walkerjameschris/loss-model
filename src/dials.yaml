@@ -115,10 +115,6 @@ xgb_depth: 6
 xgb_rate: 0.1
 xgb_rounds: 20
 
-# Final Neural Net params
-mlp_epochs: 10
-mlp_nodes: 5
-
 # Final Torch params
 torch_fun: "ReLU"
 torch_hidden: 30
