@@ -5,12 +5,7 @@
 
 # Estimates many variants of a loss model
 
-library(withr)
-library(purrr)
-library(readr)
-library(dplyr)
-library(agua)
-library(xgboost)
+library(tidyverse)
 library(tidymodels)
 
 source(here::here("src/functions.R"))
@@ -178,74 +173,13 @@ xgb_imp <-
   tibble::as_tibble() |>
   dplyr::rename_all(tolower)
 
-#### Neural Network ####
+#### Deep Learning with Python and Torch ####
 
-mlp_rec <-
+torch_rec <-
   recipes::step_normalize(
     recipe = model_rec,
     fico, dti, cltv
   )
-
-agua::h2o_start()
-
-mlp_grid <-
-  tidyr::expand_grid(
-    hidden_units = dials$hidden_units,
-    epochs = dials$epochs
-  )
-
-mlp_wflow <-
-  parsnip::mlp(
-    mode = "regression",
-    hidden_units = tune::tune(),
-    epochs = tune::tune(),
-    activation = "tanh"
-  ) |>
-  parsnip::set_engine(
-    engine = "h2o",
-    reproducible = TRUE, 
-    seed = 2468
-  ) |>
-  workflows::workflow(
-    preprocessor = mlp_rec,
-    spec = _
-  )
-
-if (dials$tune_mlp) {
-    
-  tune::tune_grid(
-    object = mlp_wflow,
-    resamples = bootstrap_data,
-    metrics = metric_bundle,
-    grid = mlp_grid,
-    control = tune::control_grid(verbose = TRUE)
-  ) |>
-    tune::collect_metrics() |>
-    dplyr::select(
-      dplyr::all_of(names(mlp_grid)),
-      metric = .metric,
-      mean
-    ) |>
-    readr::write_csv(
-      here::here("data/tune_mlp.csv")
-    )
-
-}
-
-mlp_mod <-
-  list(
-    hidden_units = dials$mlp_nodes,
-    epochs = dials$mlp_epochs
-  ) |>
-  tune::finalize_workflow(
-    x = mlp_wflow,
-    parameters = _
-  ) |>
-  parsnip::fit(train_test$train)
-
-mlp <- evaluate(mlp_mod, train_test)
-
-#### Deep Learning with Python and Torch ####
 
 temp_files <-
   train_test |>
@@ -254,7 +188,7 @@ temp_files <-
     temp_path <- here::here(i)
     
     recipes::bake(
-      object = recipes::prep(mlp_rec),
+      object = recipes::prep(torch_rec),
       new_data = data
     ) |>
       readr::write_csv(temp_path)
@@ -281,7 +215,6 @@ fs::file_delete(temp_files)
 tibble::lst(
   ols,
   xgb,
-  mlp,
   torch
 ) |>
   dplyr::bind_rows(

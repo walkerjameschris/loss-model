@@ -99,10 +99,6 @@ tree_depth: [24, 12, 6]
 learn_rate: [0.1, 0.3]
 trees: [40, 20, 10]
 
-# MLP params
-epochs: [10, 15]
-hidden_units: [5, 10, 20]
-
 # Torch Params
 num_hidden: [10, 20, 30]
 dropout: [0, 0.2]
@@ -112,7 +108,6 @@ active_fn: ["ReLU", "LeakyReLU"]
 run_stable: FALSE
 run_mars: FALSE
 tune_xgb: FALSE
-tune_mlp: FALSE
 tune_torch: FALSE
 
 # Final XGB params
