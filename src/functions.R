@@ -191,6 +191,20 @@ gam_formula <- function(recipe, terms = c("fico", "dti", "cltv")) {
 
 #### Presentation ####
 
+figure_no <- function(description) {
+
+  value <- Sys.getenv("plot_no")
+
+  if (value == "") {
+    value <- 1
+  } else {
+    value <- as.numeric(value)
+  }
+
+  Sys.setenv(plot_no = value + 1)
+  glue::glue("Table {value}: {description}")
+}
+
 theme_plot <- function() {
   
   ggplot2::theme_minimal() +
@@ -199,7 +213,8 @@ theme_plot <- function() {
       plot.title = ggplot2::element_text(face = "bold"),
       legend.title = ggplot2::element_blank(),
       panel.background = ggplot2::element_blank(),
-      panel.grid = ggplot2::element_line("darkgray")
+      panel.grid = ggplot2::element_line("darkgray"),
+      plot.caption = ggplot2::element_text(hjust = 0.5)
     )
 }
 

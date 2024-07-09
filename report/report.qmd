@@ -68,15 +68,21 @@ Obtaining good estimates of expected gross loss in a stress scenario is useful f
 
 First, a few definitions:
 
-| Term | Abbreviation | Definition |
-|---------------------|------------------|---------------------------------|
-| debt-to-income | DTI | Ratio of debt to a person's income |
-| combined loan-to-value | CLTV | Ratio of loan balance to property value |
-| credit score | FICO | Representation of credit history risk |
-| basis-points | Bps | 0.01% of a percent |
-| unpaid balance | UPB | Loan balance to be paid |
-| mortgage insurance | MI | Insurance paid to offset losses |
-| delinquent | DQ | Failure to make payments |
+```{r}
+tibble::tribble(
+  ~ Term, ~ Abbreviation, ~ Definition,
+  "debt-to-income", "DTI", "Ratio of debt to a person's income",
+  "combined loan-to-value", "CLTV", "Ratio of loan balance to property value",
+  "credit score", "FICO", "Representation of credit history risk",
+  "basis-points", "Bps", "0.01% of a percent",
+  "unpaid balance", "UPB", "Loan balance to be paid",
+  "mortgage insurance", "MI", "Insurance paid to offset losses",
+  "delinquent", "DQ", "Failure to make payments"
+) |>
+  knitr::kable(
+    caption = "Definitions used in credit modeling"
+  )
+```
 
 # Data
 
@@ -126,7 +132,8 @@ ggplot2::ggplot(
     x = "Gross Loss (Bps)",
     y = "Density",
     title = "Distribution of Gross Loss",
-    subtitle = "Within training data"
+    subtitle = "Within training data",
+    caption = figure_no("Varable distribution")
   ) +
   theme_plot() +
   ggplot2::theme(
@@ -199,7 +206,7 @@ coef_df |>
     subtitle = "Random Resample of Training",
     x = "Estimate",
     y = "Term",
-    caption = "Brackets show a 95% CI t-test"
+    caption = figure_no("Coefficient stability analysis")
   ) +
   theme_plot() +
   ggthemes::scale_color_tableau(
@@ -223,11 +230,6 @@ dplyr::slice_sample(
   withr::with_seed(
     seed = 12345
   ) |>
-  dplyr::mutate(
-    fico = fico * 100,
-    cltv = cltv * 10,
-    dti = dti * 10
-  ) |>
   tidyr::pivot_longer(
     c(fico, cltv, dti)
   ) |>
@@ -249,7 +251,8 @@ dplyr::slice_sample(
     x = "Value",
     y = "Density",
     title = "Distribution of Continuous Predictors",
-    subtitle = "From training data"
+    subtitle = "From training data",
+    caption = figure_no("Predictor distributions")
   ) +
   theme_plot()
 ```
@@ -265,7 +268,9 @@ train_test |>
     Population = stringr::str_to_title(pop),
     name = "Observations"
   ) |>
-  knitr::kable()
+  knitr::kable(
+     caption = "Train test splits"
+  )
 ```
 
 # Learning Methods
@@ -307,7 +312,9 @@ specs$ols |>
     Estimate = round(estimate),
     P.Value = scales::label_pvalue()(p.value)
   ) |>
-  knitr::kable()
+  knitr::kable(
+    caption = "Linear regression specifications"
+  )
 ```
 
 ## XGBoost
@@ -319,7 +326,7 @@ Extreme Gradient Boost (XGBoost or XGB) comes from a family of gradient boosted 
 XGBoost uses something called Similarity Score to determine which variable and at which point along the variable (if it is continuous) produces clusters of data that are the most similar. After all, tree based models aim to bucket similar data together. Sufficiently similar data will get a representative prediction. A similarity score is computed as:
 
 $$
-\text{Similarity} = \frac{(\sum{\hat{y}-{y}})^2}{\text{Number of Residuals}}
+\text{Similarity} = \frac{(\sum{\hat{y}-{y}})^2}{\text{Number of Residuals}+\lambda}
 $$
 
 To prevent overfitting, XGBoost controls the impact of each tree with a learning rate and a shrinkage parameter. This reduces the impact of any single tree in the series and works to prevent overfitting or rote memorization of the training data. The trees' predictions are then combined, resulting in a robust ensemble that captures intricate relationships between features and the target variable. This learning method is powerful because:
@@ -328,7 +335,7 @@ To prevent overfitting, XGBoost controls the impact of each tree with a learning
 -   It is robust to outliers and extreme values
 -   The algorithm is widely used and optimized for performance (e.g., multithreading)
 
-However, it has some drawbacks. For example, it has a tendency to overfit despite controls put in place to prevent overfitting. It also does a poor job with extrapolation like other tree methods. This is because XGBoost assigns a value to data based on buckets. If your data is in a bucket at the top or low end of a variable's range (e.g., FICO \> 780) the tree will assign the same value regardless of how far the observation is from the decision point (FICO 780 in the example here). Finally, XGB still struggles with interpretability like other non-linear methods. While metrics (e.g., SHAP) help to explain feature importance, the model itself contains too many parameters, decision points, data, etc to be well understood like a linear regression.
+However, it has some drawbacks. For example, it has a tendency to overfit despite controls put in place to prevent overfitting. It also does a poor job with extrapolation like other tree methods. This is because XGBoost assigns a value to data based on buckets. If your data is in a bucket at the top or low end of a variable's range (e.g., FICO \> 780) the tree will assign the same value regardless of how far the observation is from the decision point (FICO 780 in the example here). Finally, XGB still struggles with interpretability like other non-linear methods. While metrics (e.g., frequency is a metric discussed later) help to explain feature importance, the model itself contains too many parameters and decision points to be well understood like a linear regression.
 
 ### Estimation
 
@@ -342,7 +349,7 @@ All of these values have a direct relationship with overfitting. However, settin
 
 Using the feature importance metrics from `xgboost` we can get a sense of the contribution from each predictor. Where frequency represents the share of nodes across all trees which use each predictor, gain represents the marginal performance contribution of each predictor. A higher value corresponds to greater importance for both values.
 
-FICO is the most important predictor followed by CLTV and DTI. Those three predictors alone dictate over 50% of the nodes in the tree. All other predictors merely assist those core predictors in understanding loss.
+FICO is the most important predictor followed by CLTV and DTI. Those three predictors alone dictate over 50% of the nodes in the tree as denoted by frequency in the table below. All other predictors merely assist those core predictors in understanding loss.
 
 ```{r}
 specs$xgb |>
@@ -354,14 +361,16 @@ specs$xgb |>
     Frequency = scales::label_percent(0.1)(frequency),
     Gain = round(gain, 3)
   ) |>
-  knitr::kable()
+  knitr::kable(
+    caption = "XGBoost feature importance"
+  )
 ```
 
 ## Neural Network
 
 ### Background
 
-The final model type we explored is a deep learning model estimated in Python using `torch`. A deep learning model is simply a neural network of sufficient depth (typically two or more hidden layers). Models of this type can be built to solve extremely complex learning problems including computer vision, language modeling, and more. However, they can still be applied to more traditional predictive applications like this loss model.
+The final model type we explored is a deep learning model estimated in Python using `torch`. A deep learning model is simply a neural network of two or more hidden layers. Models of this type can be built to solve extremely complex learning problems including computer vision, language modeling, and more. However, they can still be applied to more traditional predictive applications like this loss model.
 
 A deep learning model for regression is a series of interconnected processing units. Each unit receives data (inputs) representing features, multiplies them by weights (learned values similar to regression coefficients), and sums them up. This sum is then passed through an activation function. The activation function decides how much influence each unit's calculation has on the final output. Common choices in regression include the ReLU function, which allows positive values to pass through unchanged, and zeroes out negative ones. This adds non-linearity, enabling the model to capture complex relationships.
 
@@ -404,7 +413,8 @@ tibble::tibble(
   ggplot2::labs(
     title = "Activation Functions",
     x = "X",
-    y = "Y"
+    y = "Y",
+    caption = figure_no("Activation functions in deep learning")
   ) +
   ggplot2::theme(
     legend.position = "none"
@@ -415,6 +425,23 @@ tibble::tibble(
   ggthemes::scale_color_tableau(
     direction = -1
   )
+```
+
+A deep learning network feeds forward by taking the design matrix, multiplying it with weights (hidden layers), and applying activation functions. In our case, our deep learning model contains three hidden layers and one output layer. It also uses the ReLU function. Assume that *X* is our design matrix and *W* are our weight matrices. We can denote the feed forward in pseudocode as:
+
+``` python
+# The design matrix
+X = matrix()
+
+# The activation function
+ReLU = lambda x: max(0, x)
+
+# Feed forward
+for W in layers:
+  X = ReLU(X @ W)
+
+# Predictions as a column-vector:
+print(X)
 ```
 
 # Performance Comparison
@@ -428,7 +455,7 @@ $$
 Both Gini and ROC measure the model's ability to rank order a population. Thus they place greater emphasis on the model's ability to assign a higher value to riskier observations than a less risky observation regardless of the truthfulness of that actual value. This is in contrast to the square-root-mean-squared-error or RMSE which places more emphasis on accurate model prediction and takes the following form:
 
 $$
-\text{RMSE}=\sqrt{\frac{1}{n}\sum{\hat{y}_i-y_i}}
+\text{RMSE}=\sqrt{\frac{1}{n}\sum{(\hat{y}_i-y_i})^2}
 $$
 
 Finially, tail-match-rate or TMR, like Gini, measures a model's ability to rank order. However, Gini measures rank ordering performance across the working range of our response variable. TMR measures the overlap between the highest 5% of actual loss values and 5% predicted values by asking the question "what percentage of the 5% highest loss values are within the 5% highest predicted values?" It takes the following form:
@@ -440,12 +467,12 @@ $$
 Where *n* is:
 
 $$
-n=\sum{y_i \geq \text{95th percentile of }y}
+n=\sum{I(y_i \geq \text{95th percentile of }y)}
 $$
 
-In general we would like to maximize Gini and TMR to improve rank ordering while minimizing RMSE to reduce loss. However, in a credit decision setting we would prioritize rank ordering over accuracy. This is because most models are compared to some threshold which decides what is an acceptable amount of risk. The specific threshold does not matter so long as those above the threshold are riskier than those below it as indicated by rank ordering performance.
+In general we would like to maximize Gini and TMR to improve rank ordering while minimizing RMSE to reduce loss. However, in a credit decision setting we would prioritize rank ordering over accuracy. This is because most models are compared to some threshold which decides what is an acceptable amount of risk for an approved application. The specific threshold does not matter so long as those above the threshold are riskier than those below it as indicated by rank ordering performance.
 
-If we leverage Gini as our dominant metric then XGBoost provides the best overall performance. This is meaningful because Gini measures rank ordering performance across the range of the response variable. However, if we use TMR or RMSE the deep learning model estimated using `torch` is the best performer for both train and test. Both models perform better than linear regression (OLS) despite the introduction of splines.
+If we leverage Gini as our dominant metric then XGBoost provides the best overall performance. This is meaningful because Gini measures rank ordering performance across the range of the response variable. However, if we use TMR or RMSE the deep learning model estimated using `torch` is the best performer for both train and test. Both models perform better than linear regression (OLS) despite the introduction of splines in our linear model.
 
 ```{r}
 performance |>
@@ -457,12 +484,14 @@ performance |>
     rmse = round(rmse)
   ) |>
   dplyr::rename_with(make_nicenames) |>
-  knitr::kable()
+  knitr::kable(
+    caption = "Model performance"
+  )
 ```
 
-While it may seem that we would have difficulty choosing between XGBoost and `torch`, the fact of the matter is that the deep learning model was significantly more time and research intensive to develop. Furthermore, it was much more sensitive during our tuning phase while also taking much longer to converge despite the use of a CUDA GPU accelerator!
+While it may seem that we would have difficulty choosing between XGBoost and `torch`, the deep learning model was significantly more time and research intensive to develop. Furthermore, it was much more sensitive during our tuning phase while also taking much longer to converge!
 
-This does not discredit the usefulness of deep learning models. However, it does suggest that relative to XGBoost, deep learning models are more challenging to develop. Likewise, XGBoost and its associated frameworks have made strides in developing useful model constraints such as monotonicity controls which allow modelers to specify the type of relationship a variable should have with the response (positive or negative). It is for these reasons that our champion model is our tuned XGBoost. We would recommend this model type for a wide variety of modeling applications.
+This does not discredit the usefulness of deep learning models. However, it does suggest that relative to XGBoost, deep learning models are more challenging to develop particularly for narrow predictive applications. Likewise, XGBoost and its associated frameworks have made strides in developing useful model constraints. For example, monotonicity controls which allow modelers to specify the type of relationship a variable should have with the response (positive or negative). It is for these reasons that our **champion model is our tuned XGBoost**. We recommend this model type for a wide variety of modeling applications.
 
 # Resources
 
