@@ -153,40 +153,21 @@ make_predictions <- function(data, model) {
 evaluate <- function(model,
                      data,
                      truth = gross_loss,
-                     population = population) {
+                     population = population,
+                     transform = \(x) x) {
   # Full evaluation of model
   
   make_predictions(
     data = data,
     model = model
   ) |>
+    dplyr::mutate(
+      .pred = transform(.pred)
+    ) |>
     get_performance(
       truth = {{ truth }},
       population = {{ population }}
     )
-}
-
-gam_formula <- function(recipe, terms = c("fico", "dti", "cltv")) {
-  
-  recipes::prep(recipe) |>
-    purrr::pluck("term_info") |>
-    dplyr::filter(
-      role %in% c("outcome", "predictor")
-    ) |>
-    dplyr::mutate(
-      variable = dplyr::if_else(
-        variable %in% terms,
-        glue::glue("s({variable})"),
-        glue::as_glue(variable)
-      )
-    ) |>
-    split(~ role) |>
-    purrr::map("variable") |>
-    purrr::map(
-      \(x) glue::glue_collapse(x, " + ")
-    ) |>
-    glue::glue_data("{outcome} ~ {predictor}") |>
-    as.formula()
 }
 
 #### Presentation ####
@@ -202,7 +183,7 @@ figure_no <- function(description) {
   }
 
   Sys.setenv(plot_no = value + 1)
-  glue::glue("Table {value}: {description}")
+  glue::glue("Figure {value}: {description}")
 }
 
 theme_plot <- function() {

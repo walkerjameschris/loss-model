@@ -101,6 +101,34 @@ ols_mod <-
 
 ols <- evaluate(ols_mod, train_test)
 
+#### Log Transformed OLS for Comparison
+
+ols_mod_log <-
+  recipes::step_mutate(
+    ols_rec,
+    gross_loss = log(pmax(gross_loss, 0.001))
+  ) |>
+  workflows::workflow(
+    parsnip::linear_reg()
+  ) |>
+  parsnip::fit(train_test$train)
+
+ols_log <- evaluate(ols_mod_log, train_test, transform = exp)
+
+#### Normalize OLS for Importance ####
+
+ols_std_rec <-
+  recipes::step_normalize(
+    recipe = model_rec,
+    dti,
+    fico,
+    cltv
+  ) |>
+  workflows::workflow(
+    parsnip::linear_reg()
+  ) |>
+  parsnip::fit(train_test$train)
+
 #### XGBoost ####
 
 bootstrap_data <-
@@ -240,6 +268,8 @@ tibble::lst(
 tibble::lst(
   ols = broom::tidy(ols_mod),
   ols_resid = parsnip::augment(ols_mod, head(train_test$test, 1000)),
+  ols_log_resid = parsnip::augment(ols_mod_log, head(train_test$test, 1000)),
+  ols_std_coef = broom::tidy(ols_std_rec),
   xgb = xgb_imp
 ) |>
   readr::write_rds(

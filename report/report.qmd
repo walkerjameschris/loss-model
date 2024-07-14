@@ -102,13 +102,65 @@ $$
 \text{Gross Loss Bps}=10000\times\frac{\text{Gross Loss}}{\text{Origination UPB}}
 $$
 
-We divide gross loss values by the original loan balance (origination UPB) and convert them to Bps. This provides us a value representing the percentage of a loan's original value which we might expect to be lost given a delinquency in a stressed economic scenario. Because we wanted to simulate losses in a stressed environment, we utilized loans originated right before the financial crisis (2007 acquisitions). However, not all loans in this population experienced a loss. Using the [user guide provided by Freddie Mac](https://www.freddiemac.com/fmac-resources/research/pdf/user_guide.pdf), we restrict to loans which satisfy these conditions:
+We divide gross loss values by the original loan balance (origination UPB) and convert them to Bps. This provides us a value representing the percentage of a loan's original value which we might expect to be lost given a delinquency in a stressed economic scenario. Not all loans in this population experienced a loss. Using the [user guide provided by Freddie Mac](https://www.freddiemac.com/fmac-resources/research/pdf/user_guide.pdf), we restrict to loans which satisfy these conditions:
 
 -   Is a third party sale, short sale or charge off, REO disposition, or whole loan sale
 
 -   Does not have a populated defect settlement date
 
--   Has all components of the loss calculation present (not missing)
+-   Has all components of the loss calculation present
+
+Freddie Mac provides data for acquisition vintages ranging from 1999 to 2021. We chose the 2007 vintage for two primary reasons. First, we wanted to simulate a stressed scenario and 2007 represents the height of loss values as shown in the figure below. Second, computational resources limited the amount of data we could use at a single time creating the need to select one vintage.
+
+```{r}
+tibble::tibble(
+  year = seq(1999, 2021),
+  loss = c(
+    0.1, 0.1, 0.2, 0.3,
+    0.7, 1.4, 6.3, 15.6,
+    20.3, 2.3, rep(0, 13)
+  )
+) |>
+  ggplot2::ggplot(
+    ggplot2::aes(
+      x = year,
+      y = loss
+    )
+  ) +
+  ggplot2::geom_line(
+    color = plot_color
+  ) +
+  ggplot2::geom_curve(
+    data = tibble::tibble(1),
+    arrow = ggplot2::arrow(
+      angle = 45,
+      length = ggplot2::unit(0.075, "in")
+    ),
+    ggplot2::aes(
+      x = 2014,
+      xend = 2008,
+      y = 15,
+      yend = 20
+    )
+  ) +
+  ggplot2::geom_text(
+    data = tibble::tibble(1),
+    size = 3,
+    ggplot2::aes(
+      x = 2014,
+      y = 13.5,
+      label = "Peak losses in 2007"
+    )
+  ) +
+  ggplot2::labs(
+    x = "Vintage",
+    y = "Total Loss (Billions)",
+    title = "Total Losses by Vintage",
+    subtitle = "Sourced from Freddie Mac Data",
+    caption = figure_no("Annualized Loss Values")
+  ) +
+  theme_plot()
+```
 
 The Freddie Mac data does include a net loss calculation as part of the data set. We compute our target variable from scratch because we want to measure risk to the financial system. However, the included net loss value is set to zero if one of the last two conditions listed above is not present. Thus, the training data for this model applies the following two conditions:
 
@@ -257,7 +309,7 @@ dplyr::slice_sample(
   theme_plot()
 ```
 
-Our complete data set contains `r nrow(dplyr::bind_rows(train_test))` records. We split the data into train and test. The train population is used for all model fitting procedures. We then use resampling approaches for interim steps (like hyperparameter tuning). Finally, we use the test population for final comparison between models.
+Our complete data set contains `r nrow(dplyr::bind_rows(train_test))` records. We split the data into train and test using 75% and 25% of the data, respectively. The train population is used for all model fitting and tuning procedures. We used resampling approaches such as bootstrapping for interim steps (like hyperparameter tuning). Note that the testing data is never used for model fitting, tuning, or interim evaluation. Thus, the model comparison contains no data leakage. Finally, we use the test population for final comparison between models.
 
 ```{r}
 train_test |>
@@ -269,7 +321,74 @@ train_test |>
     name = "Observations"
   ) |>
   knitr::kable(
-     caption = "Train test splits"
+    caption = "Train test splits"
+  )
+```
+
+## Data Treatment
+
+Before estimation, we wanted to discuss data treatments. While specific transformations (such as splines or log transforms) were applied to the different learning methods, this section focuses on considerations made for data quality issues such as missing or extreme values. Because this dataset is a cleaned research dataset made publicly available by Freddie Mac, little to no data cleaning was necessary to prepare this data for modeling. Lets discuss both numeric and categorical predictors in turn.
+
+Below is a table indicating simple summary statistics for our three numeric predictors. These are sometimes expanded into splines, but they remain column vectors for this table. All three variables have sensible ranges and distributions while also containing no missing values. Note that Freddie Mac does include special values which indicate missing values (e.g., -9999 for FICO). Those values were handled when the data was pulled prior to any estimation or summary statistic computation.
+
+```{r}
+train_test$train |>
+  dplyr::select(
+    cltv,
+    fico,
+    dti
+  ) |>
+  tidyr::pivot_longer(
+    dplyr::everything()
+  ) |>
+  dplyr::group_by(
+    Variable = make_nicenames(name)
+   ) |>
+  dplyr::reframe(
+    name = c(seq(0, 1, 0.25), -1, -2),
+    value = c(
+      quantile(value, name[name >= 0]),
+      round(mean(value)),
+      sum(is.na(value))
+    ),
+    name = dplyr::case_when(
+      name == -2 ~ "Missing",
+      name == -1 ~ "Mean",
+      name == 1 ~ "Max",
+      name == 0 ~ "Min",
+      .default = glue::glue("{name * 100}th")
+    )
+  ) |>
+  tidyr::pivot_wider() |>
+  knitr::kable(
+    caption = "Numeric Preditor Ranges"
+  )
+```
+
+Similarly, this table indicates the shares for each of the categorical terms. Note that a given category term superset (e.g., all of the *Region:* terms) will not add up to 100%. This is because all other observations would be in the referece category. The table below simply reveals the average of the 0s and 1s present in each of the one hot encoded terms. Like the numeric predictors, all observations fall into one of the associated categories and no missing values are present.
+
+```{r}
+recipes::bake(
+  object = recipes::prep(base_rec),
+  new_data = train_test$train
+) |>
+  dplyr::select(
+    one_unit,
+    one_borrower,
+    dplyr::matches("occ|prop|purp|term|region")
+  ) |>
+  tidyr::pivot_longer(
+    dplyr::everything(),
+    names_transform = make_nicenames
+  ) |>
+  dplyr::group_by(
+    Variable = name
+  ) |>
+  dplyr::reframe(
+    Share = scales::label_percent(0.1)(mean(value))
+  ) |>
+  knitr::kable(
+    caption = "Categorical Shares"
   )
 ```
 
@@ -309,11 +428,79 @@ To construct our splines we will leverage the `earth` package in R which relates
 specs$ols |>
   dplyr::reframe(
     Term = make_nicenames(term),
-    Estimate = round(estimate),
+    Estimate = round(estimate, 4),
     P.Value = scales::label_pvalue()(p.value)
   ) |>
   knitr::kable(
     caption = "Linear regression specifications"
+  )
+```
+
+Note that we did not transform the independent variable for our OLS model. While it is common to apply a log transformation on loss values (given their long tail) to improve assumptions including the linearity, expected residual of zero, and normality assumptions, in this case it did not reveal an improvement in the fitted versus residuals plot.
+
+Below is a direct comparison of the log transformed and non-transformed models. The log transformed model (left) shows that the residuals have a long right tail and do not have an expected value of zero. The non-transformed model (right) however, does reveal residuals which appear more randomly scattered with consistent tails and no discernible patterns.
+
+```{r, fig.width=6}
+dplyr::bind_rows(
+  None = specs$ols_resid,
+  Log = specs$ols_log_resid,
+  .id = "transform"
+) |>
+  ggplot2::ggplot(
+    ggplot2::aes(
+      x = .pred,
+      y = .resid
+    )
+  ) +
+  ggplot2::geom_point(
+    color = plot_color,
+    size = 0.5
+  ) +
+  ggplot2::geom_hline(
+    yintercept = 0,
+    color = "black",
+    linetype = "dashed"
+  ) +
+  theme_plot() +
+  ggplot2::facet_wrap(
+    facets = ggplot2::vars(transform),
+    scales = "free"
+  ) +
+  ggplot2::labs(
+    x = "Fitted Values",
+    y = "Residuals",
+    title = "Fitted vs Residuals",
+    subtitle = "From testing data",
+    caption = figure_no("OLS Residual Comparison")
+  )
+  
+```
+
+The figure below displays the distributions of each OLS model. We observe that the non-transformed model reveals more normally distributed residuals. This helps with model assumptions and reinforces the validity of test statistics (such as t-values and p-values) from the non-transformed OLS model.
+
+```{r fig.width=6}
+dplyr::bind_rows(
+  None = specs$ols_resid,
+  Log = specs$ols_log_resid,
+  .id = "transform"
+) |>
+  ggplot2::ggplot(
+    ggplot2::aes(.resid)
+  ) +
+  ggplot2::geom_density(
+    color = plot_color
+  ) +
+  theme_plot() +
+  ggplot2::facet_wrap(
+    facets = ggplot2::vars(transform),
+    scales = "free"
+  ) +
+  ggplot2::labs(
+    x = "Fitted Values",
+    y = "Density",
+    title = "Residual Distributions",
+    subtitle = "From testing data",
+    caption = figure_no("OLS Residual Distributions")
   )
 ```
 
@@ -357,7 +544,7 @@ specs$xgb |>
     desc(frequency)
   ) |>
   dplyr::reframe(
-    Feature = feature,
+    Feature = make_nicenames(feature),
     Frequency = scales::label_percent(0.1)(frequency),
     Gain = round(gain, 3)
   ) |>
@@ -444,7 +631,61 @@ for W in layers:
 print(X)
 ```
 
-# Performance Comparison
+# Model Comparison
+
+## Feature Importance
+
+We wanted to compare the importance of features across XGB and the OLS model. To do this, we investigated the rank ordering of terms from the XGB model using Gain and the absolute t-statistic from an OLS estimated using normalized terms. Note, a better method would be to use Shapley values however this was not possible due to computational constraints. More on this in the *Future Considerations* section.
+
+The table below shows the results of this exercise. It is important to remember that because the rank ordering comes from different measures which prioritize different outcomes, this ranking may not be reliable. However, given computational constraints it does help us understand how OLS and XGB might prioritize these terms.
+
+```{r}
+dplyr::bind_rows(
+  XGB = dplyr::select(
+    specs$xgb,
+    feature,
+    value = gain
+  ),
+  OLS = dplyr::select(
+    specs$ols_std_coef,
+    feature = term,
+    value = statistic
+  ),
+  .id = "name"
+) |>
+  dplyr::filter(
+    feature != "(Intercept)"
+  ) |>
+  dplyr::group_by(name) |>
+  dplyr::arrange(
+    desc(abs(value))
+  ) |>
+  dplyr::reframe(
+    name,
+    value = make_nicenames(feature),
+    Rank = dplyr::row_number()
+  ) |>
+  tidyr::pivot_wider() |>
+  dplyr::mutate(
+    "Rank Change (OLS to XGB)" = purrr::map2_chr(
+      OLS, Rank,
+      \(x, y) y - print(which(XGB == x))
+    )
+  ) |>
+  dplyr::select(
+    Rank,
+    OLS,
+    dplyr::contains("("),
+    XGB
+  ) |>
+  knitr::kable(
+    caption = "Comparison of Feature Importance"
+  )
+```
+
+Many terms remained in the same position while many others moved one or less positions. Terms which moved two or more positions up in importance (when moving from OLS to XGB) include *Property: Planned*, and *DTI*. However, it dropped the importance of *Occupy: Second* and *Purpose: Refi* by two positions.
+
+## Performance
 
 In this section we compare the relative model performance of each model using three metrics. These metrics are aimed at measuring the applicability of each model for different use cases. Specifically, Gini and TMR are designed to measure rank ordering performance whereas RMSE is designed to measure accuracy. Gini is directly related to the receiver-operator-curve or ROC. While ROC is more common in data science, Gini is common in credit risk applications and takes the following form:
 
@@ -461,7 +702,7 @@ $$
 Finially, tail-match-rate or TMR, like Gini, measures a model's ability to rank order. However, Gini measures rank ordering performance across the working range of our response variable. TMR measures the overlap between the highest 5% of actual loss values and 5% predicted values by asking the question "what percentage of the 5% highest loss values are within the 5% highest predicted values?" It takes the following form:
 
 $$
-f(z, y) = \frac{1}{n}\sum I(\hat{y}_i \geq \text{95th percentile of } \hat{y} \text{ and } y_i \geq \text{95th percentile of } y)
+\text{TMR} = \frac{1}{n}\sum I(\hat{y}_i \geq \text{95th percentile of } \hat{y} \text{ and } y_i \geq \text{95th percentile of } y)
 $$
 
 Where *n* is:
@@ -492,6 +733,14 @@ performance |>
 While it may seem that we would have difficulty choosing between XGBoost and `torch`, the deep learning model was significantly more time and research intensive to develop. Furthermore, it was much more sensitive during our tuning phase while also taking much longer to converge!
 
 This does not discredit the usefulness of deep learning models. However, it does suggest that relative to XGBoost, deep learning models are more challenging to develop particularly for narrow predictive applications. Likewise, XGBoost and its associated frameworks have made strides in developing useful model constraints. For example, monotonicity controls which allow modelers to specify the type of relationship a variable should have with the response (positive or negative). It is for these reasons that our **champion model is our tuned XGBoost**. We recommend this model type for a wide variety of modeling applications.
+
+# Future Considerations
+
+In this section we denote several considerations for future research. First, we would use more data if we were to restart this research project. This project makes use of the 2007 vintage (peak losses). However, deep learning models require considerable amounts of data to be estimated with confidence. This means that the deep learning model was at somewhat of a disadvantage in this modeling comparison. Thus, we would likely use a larger dataset or include additional vintages before exploring deep learning further. This would lead to better comparisons between deep learning and the other model types.
+
+Second, we performed a crude comparison of feature importance using normalized OLS coefficients versus Gain from XGBoost. A better approach would be to use Shapley values by way of the `shapr` package. Shapley values provide feature importance scores for almost any model type making it trivial to compare across model structures. However, when we attempted this we quickly ran out of computational resources for the XGBoost model for even a small subset of Shapley combinations. Thus, we did not include a Shapley comparison in this report.
+
+Finally, we would have utilized a three-way split of our data (especially if we used more observations). This would have divided our data into train, test, and validation. While there was no data leakage between train and test in this model, we did resample train and make hyperparameter decisions about each model using the training data. It would have been better to develop and tune models with train, chose the best tuning configuration using a validation set, and compare across models with test.
 
 # Resources
 

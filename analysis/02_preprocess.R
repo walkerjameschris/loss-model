@@ -26,7 +26,9 @@ init_split <-
     fico != 9999,
     one_borrower != 999
   ) |>
-  rsample::initial_split() |>
+  rsample::initial_split(
+    prop = 0.75
+  ) |>
   withr::with_seed(
     seed = 321
   )
