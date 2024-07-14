@@ -436,16 +436,17 @@ specs$ols |>
   )
 ```
 
-Note that we did not transform the independent variable for our OLS model. While it is common to apply a log transformation on loss values (given their long tail) to improve assumptions including the linearity, expected residual of zero, and normality assumptions, in this case it did not reveal an improvement in the fitted versus residuals plot.
-
-Below is a direct comparison of the log transformed and non-transformed models. The log transformed model (left) shows that the residuals have a long right tail and do not have an expected value of zero. The non-transformed model (right) however, does reveal residuals which appear more randomly scattered with consistent tails and no discernible patterns.
+Note that we did not transform the dependent variable for our OLS model. While it is common to apply a log transformation on loss values (given their long tail) to improve assumptions including the linearity, expected residual of zero, and normality assumptions, in this case it did not reveal an improvement in the fitted versus residuals plot. Below is a direct comparison of the log transformed and non-transformed models. The log transformed model (left) shows that the residuals have a long right tail and do not have an expected value of zero. The non-transformed model (right) however, does reveal residuals which appear more randomly scattered with consistent tails and no discernible patterns.
 
 ```{r, fig.width=6}
-dplyr::bind_rows(
-  None = specs$ols_resid,
-  Log = specs$ols_log_resid,
-  .id = "transform"
-) |>
+transform_df <-
+  dplyr::bind_rows(
+    "Non-Tranformed" = specs$ols_resid,
+    "Log-Transformed" = specs$ols_log_resid,
+    .id = "transform"
+  )
+
+transform_df |>
   ggplot2::ggplot(
     ggplot2::aes(
       x = .pred,
@@ -479,11 +480,7 @@ dplyr::bind_rows(
 The figure below displays the distributions of each OLS model. We observe that the non-transformed model reveals more normally distributed residuals. This helps with model assumptions and reinforces the validity of test statistics (such as t-values and p-values) from the non-transformed OLS model.
 
 ```{r fig.width=6}
-dplyr::bind_rows(
-  None = specs$ols_resid,
-  Log = specs$ols_log_resid,
-  .id = "transform"
-) |>
+transform_df |>
   ggplot2::ggplot(
     ggplot2::aes(.resid)
   ) +
@@ -635,9 +632,9 @@ print(X)
 
 ## Feature Importance
 
-We wanted to compare the importance of features across XGB and the OLS model. To do this, we investigated the rank ordering of terms from the XGB model using Gain and the absolute t-statistic from an OLS estimated using normalized terms. Note, a better method would be to use Shapley values however this was not possible due to computational constraints. More on this in the *Future Considerations* section.
+We wanted to compare the importance of features across XGB and the OLS model. To do this, we investigated the rank ordering of terms from the XGB model using Gain and the absolute t-statistic from an OLS estimated using normalized terms. Note, a better method would be to use Shapley values, however, this was not possible due to computational constraints. More on this in the *Future Considerations* section.
 
-The table below shows the results of this exercise. It is important to remember that because the rank ordering comes from different measures which prioritize different outcomes, this ranking may not be reliable. However, given computational constraints it does help us understand how OLS and XGB might prioritize these terms.
+The table below shows the results of this exercise. It is important to remember that because the rank ordering comes from different measures which prioritize different outcomes, this ranking may not be reliable. However, given computational constraints it does help us understand how OLS and XGB prioritize these terms.
 
 ```{r}
 dplyr::bind_rows(
@@ -667,9 +664,9 @@ dplyr::bind_rows(
   ) |>
   tidyr::pivot_wider() |>
   dplyr::mutate(
-    "Rank Change (OLS to XGB)" = purrr::map2_chr(
+    "Rank Change (OLS to XGB)" = purrr::map2_dbl(
       OLS, Rank,
-      \(x, y) y - print(which(XGB == x))
+      \(x, y) y - which(XGB == x)
     )
   ) |>
   dplyr::select(
