@@ -96,7 +96,7 @@ $$
 \text{Gross Loss}=\text{Delinquent Interest} + \text{Current UPB} + \text{Expenses} - \text{Net Sale}
 $$
 
-Delinquent interest is loan interest which accumulates when a borrower fails to make payments. Similarly, Current UPB denotes the loan balance at the time of delinquency. Once Freddie Mac repossesses the property they will attempt to sell the property. When the property finally sells much of the original loss is recouped (and sometimes a profit is made). However, in most cases there is still a gross loss balance which is positive representing loss to the financial system. These losses can be offset by MI assistance, but they are not included in this calculation.
+Delinquent interest is loan interest which accumulates when a borrower fails to make payments. Similarly, current UPB denotes the loan balance at the time of delinquency. Once Freddie Mac repossesses the property they will attempt to sell the property. When the property finally sells much of the original loss is recouped (and sometimes a profit is made). However, in most cases there is still a gross loss balance which is positive representing loss to the financial system. These losses can be offset by MI assistance, but they are not included in this calculation.
 
 $$
 \text{Gross Loss Bps}=10000\times\frac{\text{Gross Loss}}{\text{Origination UPB}}
@@ -436,7 +436,7 @@ specs$ols |>
   )
 ```
 
-Note that we did not transform the dependent variable for our OLS model. While it is common to apply a log transformation on loss values (given their long tail) to improve assumptions including the linearity, expected residual of zero, and normality assumptions, in this case it did not reveal an improvement in the fitted versus residuals plot. Below is a direct comparison of the log transformed and non-transformed models. The log transformed model (left) shows that the residuals have a long right tail and do not have an expected value of zero. The non-transformed model (right) however, does reveal residuals which appear more randomly scattered with consistent tails and no discernible patterns.
+Note that we did not transform the dependent variable for our OLS model. While it is common to apply a log transformation on loss values (given their long tail) to improve assumptions including the linearity, expected residual of zero, and normality assumptions, in this case it did not reveal an improvement in the fitted versus residuals plot. Below is a direct comparison of the log transformed and non-transformed models. The log transformed model (left) shows that the residuals have a long tail. The non-transformed model (right) however, does reveal residuals which appear more randomly scattered with consistent tails and no discernible patterns.
 
 ```{r, fig.width=6}
 transform_df <-
@@ -531,9 +531,7 @@ Despite the drawbacks of XGBoost, it remains one of the best *batteries included
 
 All of these values have a direct relationship with overfitting. However, setting these values too small means that the model will do a poor job of understanding the variance in our response variable. Thus, we tuned these values. The default values and ranges come from `tune` in `tidymodels` as to prevent arbitrary value selection. After tuning we selected values of 6, 0.1, and 20 for `tree_depth`, `learn_rate`, and `n_trees`, respectively.
 
-Using the feature importance metrics from `xgboost` we can get a sense of the contribution from each predictor. Where frequency represents the share of nodes across all trees which use each predictor, gain represents the marginal performance contribution of each predictor. A higher value corresponds to greater importance for both values.
-
-FICO is the most important predictor followed by CLTV and DTI. Those three predictors alone dictate over 50% of the nodes in the tree as denoted by frequency in the table below. All other predictors merely assist those core predictors in understanding loss.
+Using the feature importance metrics from `xgboost` we can get a sense of the contribution from each predictor. Where frequency represents the share of nodes across all trees which use each predictor, gain represents the marginal performance contribution of each predictor. A higher value corresponds to greater importance for both values. FICO is the most important predictor followed by CLTV and DTI as measured by frequency. However, gain produces a different rank ordering which we discuss in a later section.
 
 ```{r}
 specs$xgb |>
@@ -558,7 +556,7 @@ The final model type we explored is a deep learning model estimated in Python us
 
 A deep learning model for regression is a series of interconnected processing units. Each unit receives data (inputs) representing features, multiplies them by weights (learned values similar to regression coefficients), and sums them up. This sum is then passed through an activation function. The activation function decides how much influence each unit's calculation has on the final output. Common choices in regression include the ReLU function, which allows positive values to pass through unchanged, and zeroes out negative ones. This adds non-linearity, enabling the model to capture complex relationships.
 
-With many interconnected units across multiple layers, each performing this calculation with its own weights and activation function, the deep learning model builds a complex web of influences. By comparing the model's predictions with actual data and adjusting the weights based on errors (back propagation), the model learns to transform the initial inputs into accurate predictions for a target variable.
+With many interconnected units across multiple layers, each performing this calculation with its own weights and activation function, a deep learning model builds a complex web of influences. By comparing the model's predictions with actual data and adjusting the weights based on errors (back propagation), the model learns to transform the initial inputs into accurate predictions for a target variable.
 
 ### Estimation
 
@@ -632,9 +630,9 @@ print(X)
 
 ## Feature Importance
 
-We wanted to compare the importance of features across XGB and the OLS model. To do this, we investigated the rank ordering of terms from the XGB model using Gain and the absolute t-statistic from an OLS estimated using normalized terms. Note, a better method would be to use Shapley values, however, this was not possible due to computational constraints. More on this in the *Future Considerations* section.
+We wanted to compare the importance of features across XGB and the OLS model. To do this, we investigated the rank ordering of terms from the XGB model using gain and the absolute t-statistic from an OLS estimated using normalized terms. Note, a better method would be to use Shapley values, however, this was not possible due to computational constraints. More on this in the *Future Considerations* section.
 
-The table below shows the results of this exercise. It is important to remember that because the rank ordering comes from different measures which prioritize different outcomes, this ranking may not be reliable. However, given computational constraints it does help us understand how OLS and XGB prioritize these terms.
+The table below shows the results of this exercise. It is important to remember that because the rank ordering comes from different measures which prioritize different outcomes, this ranking comes with limitations. However, it does help us understand how OLS and XGB prioritize these terms.
 
 ```{r}
 dplyr::bind_rows(
@@ -735,9 +733,9 @@ This does not discredit the usefulness of deep learning models. However, it does
 
 In this section we denote several considerations for future research. First, we would use more data if we were to restart this research project. This project makes use of the 2007 vintage (peak losses). However, deep learning models require considerable amounts of data to be estimated with confidence. This means that the deep learning model was at somewhat of a disadvantage in this modeling comparison. Thus, we would likely use a larger dataset or include additional vintages before exploring deep learning further. This would lead to better comparisons between deep learning and the other model types.
 
-Second, we performed a crude comparison of feature importance using normalized OLS coefficients versus Gain from XGBoost. A better approach would be to use Shapley values by way of the `shapr` package. Shapley values provide feature importance scores for almost any model type making it trivial to compare across model structures. However, when we attempted this we quickly ran out of computational resources for the XGBoost model for even a small subset of Shapley combinations. Thus, we did not include a Shapley comparison in this report.
+Second, we performed a crude comparison of feature importance using normalized OLS coefficients versus gain from XGBoost. A better approach would be to use Shapley values package. Shapley values provide feature importance scores for almost any model type making it trivial to compare across model structures. However, when we attempted this we quickly ran out of computational resources for the XGBoost model for even a small subset of Shapley combinations. Thus, we did not include a Shapley comparison in this report.
 
-Finally, we would have utilized a three-way split of our data (especially if we used more observations). This would have divided our data into train, test, and validation. While there was no data leakage between train and test in this model, we did resample train and make hyperparameter decisions about each model using the training data. It would have been better to develop and tune models with train, chose the best tuning configuration using a validation set, and compare across models with test.
+Finally, we could improve model selection by using a three-way split of our data (especially if we used more observations). This would have divided our data into train, test, and validation. While there was no data leakage between train and test in this model, we did resample train and make hyperparameter decisions about each model using the training data. It would have been better to develop and tune models with train, choose the best tuning configuration using a validation set, and compare across models with test.
 
 # Resources
 
@@ -746,5 +744,7 @@ Finally, we would have utilized a three-way split of our data (especially if we 
 -   [XGBoost with tidymodels](https://parsnip.tidymodels.org/reference/boost_tree.html)
 
 -   [Deep learning with torch](https://pytorch.org/)
+
+-   [An intro to Shapley values](https://shap.readthedocs.io/en/latest/example_notebooks/overviews/An%20introduction%20to%20explainable%20AI%20with%20Shapley%20values.html)
 
 -   [Freddie Mac's loan level data repository](https://www.freddiemac.com/research/datasets/sf-loanlevel-dataset)

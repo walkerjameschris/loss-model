@@ -113,11 +113,9 @@ ols_mod_log <-
   ) |>
   parsnip::fit(train_test$train)
 
-ols_log <- evaluate(ols_mod_log, train_test, transform = exp)
-
 #### Normalize OLS for Importance ####
 
-ols_std_rec <-
+ols_mod_std <-
   recipes::step_normalize(
     recipe = model_rec,
     dti,
@@ -269,7 +267,7 @@ tibble::lst(
   ols = broom::tidy(ols_mod),
   ols_resid = parsnip::augment(ols_mod, head(train_test$test, 1000)),
   ols_log_resid = parsnip::augment(ols_mod_log, head(train_test$test, 1000)),
-  ols_std_coef = broom::tidy(ols_std_rec),
+  ols_std_coef = broom::tidy(ols_mod_std),
   xgb = xgb_imp
 ) |>
   readr::write_rds(
