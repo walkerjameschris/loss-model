@@ -215,7 +215,7 @@ make_nicenames <- function(x) {
     "occupancy_i" ~ "Occupy: Investor",
     "occupancy_s" ~ "Occupy: Second",
     "one_borrower" ~ "One Borrower",
-    "one_unit" ~ "Single Family",
+    "one_unit" ~ "One Unit",
     "property_ref" ~ "Property: Single Family",
     "property_co" ~ "Property: Condo",
     "property_pu" ~ "Property: Planned",

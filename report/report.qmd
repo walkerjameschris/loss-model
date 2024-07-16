@@ -40,7 +40,8 @@ exclude <-
   ) |>
   dplyr::reframe(
     pct = scales::label_percent(0.1)(mean(exclude)),
-    n = sum(exclude)
+    n = sum(exclude),
+    total = dplyr::n()
   )
 
 base_rec <-
@@ -98,66 +99,11 @@ tibble::tribble(
 
 # Data
 
-## Data Treatment
+## Data Source and Exclusions
 
-This research data from Freddie Mac is generally cleaned and ready for use. However, this section focuses on considerations made when determining the best model sample for our use case. We discuss which data exclusions were applied, how missing values were handled, and a robust check for extreme values. Lets begin by discussing model exclusions. Exclusions are important because they define the universe for which our model is estimated. Sample selection determines which observeraions are in our training data and greatly impact the correlation relationships we identify.
+Data for this project comes courtesy of [Freddie Mac's loan level data repository](https://www.freddiemac.com/research/datasets/sf-loanlevel-dataset). This data repository contains anonymous mortgage data in two primary components; origination data and over time data. Origination data contains information about a loan at its origin. This contains fields like the borrowers' UPB, FICO, LTV, and DTI when the loan was created. Alternatively, the over time data contains monthly summaries of mortgage activity as a borrower pays down their mortgage. This over time data contains information about losses.
 
-We applied the following exclusions to our data. The first two exclusions set the universe for the types of mortgage losses we are interested in modeling. These `zero_bal_code` codes restrict to losses which result from a third party sale, short sale, charge off, REO disposition, or whole loan sale. Similarly, the `net_loss` filter ensures that all loss fields are complete, and therefore we can compute a truthful gross loss value. We also selected the 2007 vintage as it represents the peak of mortgage losses. We further discuss justifications for all of these loss universe exclusions in the *Target Variable* section below.
-
-We also handled exclusions for missingness. Freddie Mac has denoted special missing values for several predictors we are interested in using in our models. Those are denoted below as filters for `dti`, `cltv`, `fico`, and `one_borrower`. In total these exclusions remove `r exclude$pct` of our data or a total of `r exclude$n` observations.
-
-```{sql, echo=TRUE}
-#| eval: FALSE
--- Exclusions for loss universe
-zero_bal_code in ('02', '03', '09', '15')
-and net_loss != 0
-
--- Exclusisons for missingness
-and dti != 999
-and cltv != 999
-and fico != 9999
-and one_borrower != 999
-```
-
-Our complete data post-exclusion set contains `r nrow(dplyr::bind_rows(train_test))` records from the 2007 vintage. We split the data into train and test using 75% and 25% of the data, respectively. The train population is used for all model fitting and tuning procedures. We used resampling approaches such as bootstrapping for interim steps (like hyperparameter tuning). Note that the testing data is never used for model fitting, tuning, or interim evaluation. Thus, the model comparison contains no data leakage. Finally, we use the test population for final comparison between models.
-
-```{r}
-train_test |>
-  dplyr::bind_rows(
-    .id = "pop"
-  ) |>
-  dplyr::count(
-    Population = stringr::str_to_title(pop),
-    name = "Observations"
-  ) |>
-  knitr::kable(
-    caption = "Train test splits"
-  )
-```
-
-## Target Variable
-
-Data for this project comes courtesy of [Freddie Mac's loan level data repository](https://www.freddiemac.com/research/datasets/sf-loanlevel-dataset). This data repository contains anonymous mortgage data in two primary components; origination data and over time data. Origination data contains information about a loan at its origin. This contains fields like the borrowers' UPB, FICO, LTV, and DTI when the loan was created. Alternatively, the over time data contains monthly summaries of mortgage activity as a borrower pays down their mortgage. This over time data contains information about losses. A mortgage loss occurs when a borrower fails to make payments and enters delinquent status. The financial system incurs losses when borrowers become delinquent for an extended period of time.
-
-We compute loss as risk to the financial system. This means that it is possible to compute the amount of losses incurred by Freddie Mac (for example, losses minus insurance payments) but instead we compute total (or gross) losses incurred by every involved party. Our loss computation follows this general form:
-
-$$
-\text{Gross Loss}=\text{Delinquent Interest} + \text{Current UPB} + \text{Expenses} - \text{Net Sale}
-$$
-
-Delinquent interest is loan interest which accumulates when a borrower fails to make payments. Similarly, current UPB denotes the loan balance at the time of delinquency. Once Freddie Mac repossesses the property they will attempt to sell the property. When the property finally sells much of the original loss is recouped (and sometimes a profit is made). However, in most cases there is still a gross loss balance which is positive representing loss to the financial system. These losses can be offset by MI assistance, but they are not included in this calculation.
-
-$$
-\text{Gross Loss Bps}=10000\times\frac{\text{Gross Loss}}{\text{Origination UPB}}
-$$
-
-We divide gross loss values by the original loan balance (origination UPB) and convert them to Bps. This provides us a value representing the percentage of a loan's original value which we might expect to be lost given a delinquency in a stressed economic scenario. Not all loans in this population experienced a loss. Using the [user guide provided by Freddie Mac](https://www.freddiemac.com/fmac-resources/research/pdf/user_guide.pdf), we restrict to loans which satisfy these conditions:
-
--   Is a third party sale, short sale or charge off, REO disposition, or whole loan sale
-
--   Does not have a populated defect settlement date
-
--   Has all components of the loss calculation present
+This data is generally cleaned and ready for use. However, this section focuses on exclusions made when determining the best model sample for our use case. Exclusions are important because they define the universe for which our model is estimated. Sample selection determines which observations are in our training data and greatly impact the correlation relationships we identify.
 
 Freddie Mac provides data for acquisition vintages ranging from 1999 to 2021. We chose the 2007 vintage for two primary reasons. First, we wanted to simulate a stressed scenario and 2007 represents the height of loss values as shown in the figure below. Second, computational resources limited the amount of data we could use at a single time creating the need to select one vintage.
 
@@ -206,10 +152,66 @@ tibble::tibble(
     y = "Total Loss (Billions)",
     title = "Total Losses by Vintage",
     subtitle = "Sourced from Freddie Mac Data",
-    caption = figure_no("Annualized Loss Values")
+    caption = figure_no("Annualized loss value totals")
   ) +
   theme_plot()
 ```
+
+We applied the following exclusions 2007 acquisitions in accordance with the pseudocode below. The first two exclusions set the universe for the types of mortgage losses we are interested in modeling. Not all loans in this population experienced a loss. Using the [user guide provided by Freddie Mac](https://www.freddiemac.com/fmac-resources/research/pdf/user_guide.pdf), we restrict to loans which satisfy these conditions:
+
+-   Is a third party sale, short sale or charge off, REO disposition, or whole loan sale
+
+-   Does not have a populated defect settlement date
+
+-   Has all components of the loss calculation present
+
+These `zero_bal_code` and `net_loss` filters ensure a given mortgage experienced at least some losses relevant to our modeling use case and that all components of the loss calculation are present. The loss universe exclusions trim the 2007 vintage data from 821238 observations to `r exclude$total` observations.
+
+```{sql, echo=TRUE, eval=FALSE}
+zero_bal_code in ('02', '03', '09', '15')
+and net_loss != 0
+```
+
+Freddie Mac has denoted special missing values for several predictors we are interested in using in our models. Those are denoted below as filters for `dti`, `cltv`, `fico`, and `one_borrower`. In total these missing value exclusions remove an additional `r exclude$n` observations.
+
+```{sql, echo=TRUE, eval=FALSE}
+dti != 999
+and cltv != 999
+and fico != 9999
+and one_borrower != 999
+```
+
+Our complete data post-exclusion set contains `r nrow(dplyr::bind_rows(train_test))` records from the 2007 vintage. We split the data into train and test using 75% and 25% of the data, respectively. The train population is used for all model fitting and tuning procedures. We used resampling approaches such as bootstrapping for interim steps (like hyperparameter tuning). Note that the testing data is never used for model fitting, tuning, or interim evaluation. Thus, the model comparison contains no data leakage. Finally, we use the test population for final comparison between models.
+
+```{r}
+train_test |>
+  dplyr::bind_rows(
+    .id = "pop"
+  ) |>
+  dplyr::count(
+    Population = stringr::str_to_title(pop),
+    name = "Observations"
+  ) |>
+  knitr::kable(
+    caption = "Train test splits"
+  )
+```
+
+## Target Variable
+
+A mortgage loss occurs when a borrower fails to make payments and enters delinquent status. The financial system incurs losses when borrowers become delinquent for an extended period of time. We compute loss as risk to the financial system. This means that it is possible to compute the amount of losses incurred by Freddie Mac (for example, losses minus insurance payments) but instead we compute total (or gross) losses incurred by every involved party. Our loss computation follows this general form:
+
+$$
+\text{Gross Loss}=\text{Delinquent Interest} + \text{Current UPB} + \text{Expenses} - \text{Net Sale}
+$$
+
+Delinquent interest is loan interest which accumulates when a borrower fails to make payments. Similarly, current UPB denotes the loan balance at the time of delinquency. Once Freddie Mac repossesses the property they will attempt to sell the property. When the property finally sells much of the original loss is recouped (and sometimes a profit is made). However, in most cases there is still a gross loss balance which is positive representing loss to the financial system. These losses can be offset by MI assistance, but they are not included in this calculation.
+
+$$
+\text{Gross Loss Bps}=10000\times\frac{\text{Gross Loss}}{\text{Origination UPB}}
+$$
+
+We divide gross loss values by the original loan balance (origination UPB) and convert them to Bps. This provides us a value representing the percentage of a loan's original value which we might expect to be lost given a delinquency in a stressed economic scenario.
 
 Our target variable has the following distribution:
 
@@ -226,7 +228,7 @@ ggplot2::ggplot(
     y = "Density",
     title = "Distribution of Gross Loss",
     subtitle = "Within training data",
-    caption = figure_no("Varable distribution")
+    caption = figure_no("Target variable distribution")
   ) +
   theme_plot() +
   ggplot2::theme(
@@ -309,11 +311,13 @@ train_test$train |>
   ) |>
   tidyr::pivot_wider() |>
   knitr::kable(
-    caption = "Numeric Preditor Ranges"
+    caption = "Numeric predictor summary"
   )
 ```
 
-Similarly, this table indicates the shares for each of the categorical terms. Note that a given category term superset (e.g., all of the *Region:* terms) will not add up to 100%. This is because all other observations would be in the reference category. The table below simply reveals the average of the 0s and 1s present in each of the one hot encoded terms. Like the numeric predictors, all observations fall into one of the associated categories and no missing values are present.
+Similarly, the table below indicates the shares for each of the categorical terms. It includes both the estimated terms and the dropped reference categories. Several terms are simple binary flags which indicate whether something is true. For example, FTHB (first time home buyer), One Borrower (whether the loan has a single applicant), and One Unit (whether a property is detached from others).
+
+Other categorical terms belong to a set of outcomes (e.g., *Region:* terms). In subsequent estimations one of these would be dropped and set as the reference category. For example, in an OLS coefficient table *Property: Single Family* would not appear because it is the reference value.
 
 ```{r}
 base_rec |>
@@ -342,9 +346,11 @@ base_rec |>
     Share = scales::label_percent(0.1)(mean(value))
   ) |>
   knitr::kable(
-    caption = "Categorical Variables"
+    caption = "Categorical variable shares"
   )
 ```
+
+The shares represent the percentage of the time a category or flag is active within our training sample. Percentages which belong to a super set (e.g., *Property:*) will add to 100%. Other independent flags (e.g., FTHB) simply indicate how often this indicator is active.
 
 ## Parameter Stability
 
@@ -501,7 +507,7 @@ transform_df |>
     y = "Residuals",
     title = "Fitted vs Residuals",
     subtitle = "From testing data",
-    caption = figure_no("OLS Residual Comparison")
+    caption = figure_no("OLS residual comparison")
   )
   
 ```
@@ -526,7 +532,7 @@ transform_df |>
     y = "Density",
     title = "Residual Distributions",
     subtitle = "From testing data",
-    caption = figure_no("OLS Residual Distributions")
+    caption = figure_no("OLS residual distributions")
   )
 ```
 
@@ -542,13 +548,13 @@ $$
 \text{Similarity} = \frac{(\sum{\hat{y}-{y}})^2}{\text{Number of Residuals}+\lambda}
 $$
 
-To prevent overfitting, XGBoost controls the impact of each tree with a learning rate and a shrinkage parameter. This reduces the impact of any single tree in the series and works to prevent overfitting or rote memorization of the training data. The trees' predictions are then combined, resulting in a robust ensemble that captures intricate relationships between features and the target variable. This learning method is powerful because:
+To prevent overfitting, XGBoost controls the impact of each tree with a learning rate and a shrinkage parameter. This reduces the impact of any single tree in the series and works to prevent over fitting or rote memorization of the training data. The trees' predictions are then combined, resulting in a robust ensemble that captures intricate relationships between features and the target variable. This learning method is powerful because:
 
 -   There is no need for splines or variable transformations
 -   It is robust to outliers and extreme values
--   The algorithm is widely used and optimized for performance (e.g., multithreading)
+-   The algorithm is widely used and optimized for performance (e.g., multi-threading)
 
-However, it has some drawbacks. For example, it has a tendency to overfit despite controls put in place to prevent overfitting. It also does a poor job with extrapolation like other tree methods. This is because XGBoost assigns a value to data based on buckets. If your data is in a bucket at the top or low end of a variable's range (e.g., FICO \> 780) the tree will assign the same value regardless of how far the observation is from the decision point (FICO 780 in the example here). Finally, XGB still struggles with interpretability like other non-linear methods. While metrics (e.g., frequency is a metric discussed later) help to explain feature importance, the model itself contains too many parameters and decision points to be well understood like a linear regression.
+However, it has some drawbacks. For example, it has a tendency to over fit despite controls put in place to prevent over fitting. It also does a poor job with extrapolation like other tree methods. This is because XGBoost assigns a value to data based on buckets. If your data is in a bucket at the top or low end of a variable's range (e.g., FICO \> 780) the tree will assign the same value regardless of how far the observation is from the decision point (FICO 780 in the example here). Finally, XGB still struggles with interpretability like other non-linear methods. While metrics (e.g., frequency is a metric discussed later) help to explain feature importance, the model itself contains too many parameters and decision points to be well understood like a linear regression.
 
 ### Estimation
 
@@ -558,7 +564,7 @@ Despite the drawbacks of XGBoost, it remains one of the best *batteries included
 -   `learn_rate`: The relative impact of each tree.
 -   `n_trees`: The number of total trees in the model.
 
-All of these values have a direct relationship with overfitting. However, setting these values too small means that the model will do a poor job of understanding the variance in our response variable. Thus, we tuned these values. The default values and ranges come from `tune` in `tidymodels` as to prevent arbitrary value selection. After tuning we selected values of 6, 0.1, and 20 for `tree_depth`, `learn_rate`, and `n_trees`, respectively.
+All of these values have a direct relationship with over fitting. However, setting these values too small means that the model will do a poor job of understanding the variance in our response variable. Thus, we tuned these values. The default values and ranges come from `tune` in `tidymodels` as to prevent arbitrary value selection. After tuning we selected values of 6, 0.1, and 20 for `tree_depth`, `learn_rate`, and `n_trees`, respectively.
 
 Using the feature importance metrics from `xgboost` we can get a sense of the contribution from each predictor. Where frequency represents the share of nodes across all trees which use each predictor, gain represents the marginal performance contribution of each predictor. A higher value corresponds to greater importance for both values. FICO is the most important predictor followed by CLTV and DTI as measured by frequency. However, gain produces a different rank ordering which we discuss in a later section.
 
@@ -593,11 +599,11 @@ Our deep learning model, like XGBoost, needs to be tuned to optimize performance
 
 -   `num_hidden`: The number of hidden nodes in each of the three hidden layers
 
--   `dropout`: The share of randomly zeroed inputs (to prevent overfitting)
+-   `dropout`: The share of randomly zeroed inputs (to prevent over fitting)
 
 -   `active_fn`: The activation function used (ReLU vs LeakyReLU)
 
-Similar to the XGB tune, we utilized default values from `tidymodels` to initialize our tuning. For `num_hidden` we tried 10, 20, and 30 whereas we tried 0% and 20% for the number of randomly dropped inputs. Both of these parameters are designed to control for overfitting of the model. Models with less dropout and more hidden layers will fit the training data well but likely overfit and perform poorly on the testing data.
+Similar to the XGB tune, we utilized default values from `tidymodels` to initialize our tuning. For `num_hidden` we tried 10, 20, and 30 whereas we tried 0% and 20% for the number of randomly dropped inputs. Both of these parameters are designed to control for over fitting of the model. Models with less dropout and more hidden layers will fit the training data well but likely over fit and perform poorly on the testing data.
 
 We also tested ReLU vs LeakyReLU as our activation function. As discussed above, these functions introduce non-linearity into the model to allow for complex relationships. The weight (or coefficient) simply adjusts the angle between the flat and angled portions of the activation functions. ReLU is a very popular choice because it is computationally efficient and simple to implement. The LeakyReLU expands on this idea by adding a slope to the flat portion to prevent exploding or vanishing gradients. Exploding or vanishing gradients are two extremes of the same problem related to the chain rule and convergence failures. After a full gamut of testing, we found that ReLU with 30 hidden nodes and 0% dropout leads to the best performance.
 
@@ -661,7 +667,7 @@ print(X)
 
 We wanted to compare the importance of features across XGB and the OLS model. To do this, we investigated the rank ordering of terms from the XGB model using gain and the absolute t-statistic from an OLS estimated using normalized terms. Note, a better method would be to use Shapley values, however, this was not possible due to computational constraints. More on this in the *Future Considerations* section.
 
-The table below shows the results of this exercise. It is important to remember that because the rank ordering comes from different measures which prioritize different outcomes, this ranking comes with limitations. However, it does help us understand how OLS and XGB prioritize these terms.
+The table below shows the results of this exercise. It is important to remember that because the rank ordering for each model structure comes from different measures which prioritize different outcomes, this ranking comes with limitations. However, it does help us understand how OLS and XGB prioritize these terms.
 
 ```{r}
 dplyr::bind_rows(
@@ -703,7 +709,7 @@ dplyr::bind_rows(
     XGB
   ) |>
   knitr::kable(
-    caption = "Comparison of Feature Importance"
+    caption = "Comparison of feature importance"
   )
 ```
 
