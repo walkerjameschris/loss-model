@@ -18,6 +18,9 @@ train_test <-
 base_rec <-
   readr::read_rds(
     here::here("data/base_rec.Rds")
+  ) |>
+  recipes::step_dummy(
+    recipes::all_nominal_predictors()
   )
 
 #### Assess Stability ####

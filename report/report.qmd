@@ -31,6 +31,18 @@ source(here::here("src/functions.R"))
 
 plot_color <- "#F28E2B"
 
+exclude <-
+  readr::read_rds(
+    here::here("data/complete_data.Rds")
+  ) |>
+  dplyr::mutate(
+    exclude = dti == 999 |  cltv == 999 | fico == 9999 | one_borrower == 999
+  ) |>
+  dplyr::reframe(
+    pct = scales::label_percent(0.1)(mean(exclude)),
+    n = sum(exclude)
+  )
+
 base_rec <-
   readr::read_rds(
     here::here("data/base_rec.Rds")
@@ -85,6 +97,43 @@ tibble::tribble(
 ```
 
 # Data
+
+## Data Treatment
+
+This research data from Freddie Mac is generally cleaned and ready for use. However, this section focuses on considerations made when determining the best model sample for our use case. We discuss which data exclusions were applied, how missing values were handled, and a robust check for extreme values. Lets begin by discussing model exclusions. Exclusions are important because they define the universe for which our model is estimated. Sample selection determines which observeraions are in our training data and greatly impact the correlation relationships we identify.
+
+We applied the following exclusions to our data. The first two exclusions set the universe for the types of mortgage losses we are interested in modeling. These `zero_bal_code` codes restrict to losses which result from a third party sale, short sale, charge off, REO disposition, or whole loan sale. Similarly, the `net_loss` filter ensures that all loss fields are complete, and therefore we can compute a truthful gross loss value. We also selected the 2007 vintage as it represents the peak of mortgage losses. We further discuss justifications for all of these loss universe exclusions in the *Target Variable* section below.
+
+We also handled exclusions for missingness. Freddie Mac has denoted special missing values for several predictors we are interested in using in our models. Those are denoted below as filters for `dti`, `cltv`, `fico`, and `one_borrower`. In total these exclusions remove `r exclude$pct` of our data or a total of `r exclude$n` observations.
+
+```{sql, echo=TRUE}
+#| eval: FALSE
+-- Exclusions for loss universe
+zero_bal_code in ('02', '03', '09', '15')
+and net_loss != 0
+
+-- Exclusisons for missingness
+and dti != 999
+and cltv != 999
+and fico != 9999
+and one_borrower != 999
+```
+
+Our complete data post-exclusion set contains `r nrow(dplyr::bind_rows(train_test))` records from the 2007 vintage. We split the data into train and test using 75% and 25% of the data, respectively. The train population is used for all model fitting and tuning procedures. We used resampling approaches such as bootstrapping for interim steps (like hyperparameter tuning). Note that the testing data is never used for model fitting, tuning, or interim evaluation. Thus, the model comparison contains no data leakage. Finally, we use the test population for final comparison between models.
+
+```{r}
+train_test |>
+  dplyr::bind_rows(
+    .id = "pop"
+  ) |>
+  dplyr::count(
+    Population = stringr::str_to_title(pop),
+    name = "Observations"
+  ) |>
+  knitr::kable(
+    caption = "Train test splits"
+  )
+```
 
 ## Target Variable
 
@@ -162,14 +211,6 @@ tibble::tibble(
   theme_plot()
 ```
 
-The Freddie Mac data does include a net loss calculation as part of the data set. We compute our target variable from scratch because we want to measure risk to the financial system. However, the included net loss value is set to zero if one of the last two conditions listed above is not present. Thus, the training data for this model applies the following two conditions:
-
-```{sql, echo=TRUE}
-#| eval: FALSE
-zero_bal_code in ('02', '03', '09', '15')
-and net_loss != 0
-```
-
 Our target variable has the following distribution:
 
 ```{r}
@@ -198,6 +239,114 @@ ggplot2::ggplot(
 This model makes use of loan level application characteristics to predict loss in basis points in origination UPB given a stressed economic scenario. While more sophisticated models can be estimated when more data is present (for example, early payment history data) we intentionally constrain this model to application level details to act as an early warning loss model. Fields which are present at the time of application include CLTV, DTI, FICO, occupancy status, property type, loan purpose, loan term, first time home buyer, and geographic region.
 
 CLTV, DTI, and FICO are continuous values. This means that these values are a number which is intended to have a positive or negative relationship with gross loss. For example, as FICO scores increase, we would expect gross loss values to fall. All other predictors are categorical variables which means they indicate one of several options. For example, someone can live in one of four regions (but not more than one at once).
+
+In the figure below we plot the distribution of each continuous predictor within the training sample. Both DTI and FICO are approximately normal. The notable exception is CLTV which has large clusters at 80% and 100%. There is incentive for borrowers to put at least 20% down on their mortgage to avoid monthly mortgage insurance payments. Similarly, the cluster around 100% are borrowers who put very little down on their mortgage but still want to purchase a home.
+
+```{r, fig.width=7}
+dplyr::slice_sample(
+  train_test$train,
+  n = 1000
+) |>
+  withr::with_seed(
+    seed = 12345
+  ) |>
+  tidyr::pivot_longer(
+    c(fico, cltv, dti)
+  ) |>
+  dplyr::mutate(
+    name = make_nicenames(name)
+  ) |>
+  ggplot2::ggplot(
+    ggplot2::aes(value)
+  ) +
+  ggplot2::geom_density(
+    color = plot_color
+  ) +
+  ggplot2::facet_wrap(
+    facets = ggplot2::vars(name),
+    scales = "free",
+    nrow = 1
+  ) +
+  ggplot2::labs(
+    x = "Value",
+    y = "Density",
+    title = "Distribution of Continuous Predictors",
+    subtitle = "From training data",
+    caption = figure_no("Predictor distributions")
+  ) +
+  theme_plot()
+```
+
+Below is a table indicating summary statistics for our three numeric predictors. These are sometimes expanded into splines, but they remain column vectors for this table. All three variables have sensible ranges and distributions and contain no missing values.
+
+```{r}
+train_test$train |>
+  dplyr::select(
+    cltv,
+    fico,
+    dti
+  ) |>
+  tidyr::pivot_longer(
+    dplyr::everything()
+  ) |>
+  dplyr::group_by(
+    Variable = make_nicenames(name)
+   ) |>
+  dplyr::reframe(
+    name = c(seq(0, 1, 0.25), -1, -2),
+    value = c(
+      quantile(value, name[name >= 0]),
+      round(mean(value)),
+      sum(is.na(value))
+    ),
+    name = dplyr::case_when(
+      name == -2 ~ "Missing",
+      name == -1 ~ "Mean",
+      name == 1 ~ "Max",
+      name == 0 ~ "Min",
+      .default = glue::glue("{name * 100}th")
+    )
+  ) |>
+  tidyr::pivot_wider() |>
+  knitr::kable(
+    caption = "Numeric Preditor Ranges"
+  )
+```
+
+Similarly, this table indicates the shares for each of the categorical terms. Note that a given category term superset (e.g., all of the *Region:* terms) will not add up to 100%. This is because all other observations would be in the reference category. The table below simply reveals the average of the 0s and 1s present in each of the one hot encoded terms. Like the numeric predictors, all observations fall into one of the associated categories and no missing values are present.
+
+```{r}
+base_rec |>
+  recipes::step_dummy(
+    recipes::all_nominal_predictors(),
+    one_hot = TRUE
+  ) |>
+  recipes::prep() |>
+  recipes::bake(
+    new_data = train_test$train
+  ) |>
+  dplyr::select(
+    - gross_loss,
+    - fico,
+    - dti,
+    - cltv
+  ) |>
+  tidyr::pivot_longer(
+    dplyr::everything(),
+    names_transform = make_nicenames,
+    names_to = "Variable"
+  ) |>
+  dplyr::group_by(Variable) |>
+  dplyr::reframe(
+    Count = sum(value),
+    Share = scales::label_percent(0.1)(mean(value))
+  ) |>
+  knitr::kable(
+    caption = "Categorical Variables"
+  )
+```
+
+## Parameter Stability
 
 Here we perform a parameter stability exercise before leveraging more interesting machine learning methods. This method begins by randomly sampling the training data with replacement 100 times. From there, we estimate linear models and assess the stability of the coefficients. There are no additional transformations or splines applied to the continuous predictors, however the categorical variables are one hot encoded.
 
@@ -272,126 +421,6 @@ One other variable which might be unstable is DTI. This term tends to correspond
 
 All things considered, the primary terms for this model will be mortgage term, geographic region, loan purpose, property type, one unit, one borrower, occupancy status, first time home buyer, FICO, and CLTV. We will monitor the importance and direction of DTI across each learning method.
 
-In the figure below we plot the distribution of each continuous predictor. Both DTI and FICO are approximately normal. The notable exception is CLTV which has large clusters at 80% and 100%. There is incentive for borrowers to put at least 20% down on their mortgage to avoid monthly mortgage insurance payments. Similarly, the cluster around 100% are borrowers who put very little down on their mortgage but still want to purchase a home.
-
-```{r, fig.width=7}
-dplyr::slice_sample(
-  train_test$train,
-  n = 1000
-) |>
-  withr::with_seed(
-    seed = 12345
-  ) |>
-  tidyr::pivot_longer(
-    c(fico, cltv, dti)
-  ) |>
-  dplyr::mutate(
-    name = make_nicenames(name)
-  ) |>
-  ggplot2::ggplot(
-    ggplot2::aes(value)
-  ) +
-  ggplot2::geom_density(
-    color = plot_color
-  ) +
-  ggplot2::facet_wrap(
-    facets = ggplot2::vars(name),
-    scales = "free",
-    nrow = 1
-  ) +
-  ggplot2::labs(
-    x = "Value",
-    y = "Density",
-    title = "Distribution of Continuous Predictors",
-    subtitle = "From training data",
-    caption = figure_no("Predictor distributions")
-  ) +
-  theme_plot()
-```
-
-Our complete data set contains `r nrow(dplyr::bind_rows(train_test))` records. We split the data into train and test using 75% and 25% of the data, respectively. The train population is used for all model fitting and tuning procedures. We used resampling approaches such as bootstrapping for interim steps (like hyperparameter tuning). Note that the testing data is never used for model fitting, tuning, or interim evaluation. Thus, the model comparison contains no data leakage. Finally, we use the test population for final comparison between models.
-
-```{r}
-train_test |>
-  dplyr::bind_rows(
-    .id = "pop"
-  ) |>
-  dplyr::count(
-    Population = stringr::str_to_title(pop),
-    name = "Observations"
-  ) |>
-  knitr::kable(
-    caption = "Train test splits"
-  )
-```
-
-## Data Treatment
-
-Before estimation, we wanted to discuss data treatments. While specific transformations (such as splines or log transforms) were applied to the different learning methods, this section focuses on considerations made for data quality issues such as missing or extreme values. Because this dataset is a cleaned research dataset made publicly available by Freddie Mac, little to no data cleaning was necessary to prepare this data for modeling. Lets discuss both numeric and categorical predictors in turn.
-
-Below is a table indicating simple summary statistics for our three numeric predictors. These are sometimes expanded into splines, but they remain column vectors for this table. All three variables have sensible ranges and distributions while also containing no missing values. Note that Freddie Mac does include special values which indicate missing values (e.g., -9999 for FICO). Those values were handled when the data was pulled prior to any estimation or summary statistic computation.
-
-```{r}
-train_test$train |>
-  dplyr::select(
-    cltv,
-    fico,
-    dti
-  ) |>
-  tidyr::pivot_longer(
-    dplyr::everything()
-  ) |>
-  dplyr::group_by(
-    Variable = make_nicenames(name)
-   ) |>
-  dplyr::reframe(
-    name = c(seq(0, 1, 0.25), -1, -2),
-    value = c(
-      quantile(value, name[name >= 0]),
-      round(mean(value)),
-      sum(is.na(value))
-    ),
-    name = dplyr::case_when(
-      name == -2 ~ "Missing",
-      name == -1 ~ "Mean",
-      name == 1 ~ "Max",
-      name == 0 ~ "Min",
-      .default = glue::glue("{name * 100}th")
-    )
-  ) |>
-  tidyr::pivot_wider() |>
-  knitr::kable(
-    caption = "Numeric Preditor Ranges"
-  )
-```
-
-Similarly, this table indicates the shares for each of the categorical terms. Note that a given category term superset (e.g., all of the *Region:* terms) will not add up to 100%. This is because all other observations would be in the referece category. The table below simply reveals the average of the 0s and 1s present in each of the one hot encoded terms. Like the numeric predictors, all observations fall into one of the associated categories and no missing values are present.
-
-```{r}
-recipes::bake(
-  object = recipes::prep(base_rec),
-  new_data = train_test$train
-) |>
-  dplyr::select(
-    one_unit,
-    one_borrower,
-    dplyr::matches("occ|prop|purp|term|region")
-  ) |>
-  tidyr::pivot_longer(
-    dplyr::everything(),
-    names_transform = make_nicenames
-  ) |>
-  dplyr::group_by(
-    Variable = name
-  ) |>
-  dplyr::reframe(
-    Share = scales::label_percent(0.1)(mean(value))
-  ) |>
-  knitr::kable(
-    caption = "Categorical Shares"
-  )
-```
-
 # Learning Methods
 
 ## Linear Regression
@@ -436,7 +465,7 @@ specs$ols |>
   )
 ```
 
-Note that we did not transform the dependent variable for our OLS model. While it is common to apply a log transformation on loss values (given their long tail) to improve assumptions including the linearity, expected residual of zero, and normality assumptions, in this case it did not reveal an improvement in the fitted versus residuals plot. Below is a direct comparison of the log transformed and non-transformed models. The log transformed model (left) shows that the residuals have a long tail. The non-transformed model (right) however, does reveal residuals which appear more randomly scattered with consistent tails and no discernible patterns.
+Note that we did not transform the dependent variable for our OLS model. While it is common to apply a log transformation on loss values (given their long tail) to ensure the key assumptions for OLS regression including constant variance, an expected residual of zero, linearity, and normality of residuals. Below is a direct comparison of the log transformed and non-transformed models. The log transformed model (left) shows that the residuals have a long tail. The non-transformed model (right) however, does reveal residuals which appear more randomly scattered with consistent tails and no discernible patterns.
 
 ```{r, fig.width=6}
 transform_df <-

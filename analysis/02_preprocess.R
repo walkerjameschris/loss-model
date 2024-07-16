@@ -90,9 +90,6 @@ recipes::recipe(
     upb,
     state
   ) |>
-  recipes::step_dummy(
-    recipes::all_nominal_predictors()
-  ) |>
   readr::write_rds(
     file = here::here("data/base_rec.Rds"),
     compress = "xz"
