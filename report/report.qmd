@@ -157,7 +157,7 @@ tibble::tibble(
   theme_plot()
 ```
 
-We applied the following exclusions 2007 acquisitions in accordance with the pseudocode below. The first two exclusions set the universe for the types of mortgage losses we are interested in modeling. Not all loans in this population experienced a loss. Using the [user guide provided by Freddie Mac](https://www.freddiemac.com/fmac-resources/research/pdf/user_guide.pdf), we restrict to loans which satisfy these conditions:
+We applied the following exclusions to 2007 acquisitions in accordance with the pseudocode below. The first two exclusions set the universe for the types of mortgage losses we are interested in modeling. Not all loans in this population experienced a loss. Using the [user guide provided by Freddie Mac](https://www.freddiemac.com/fmac-resources/research/pdf/user_guide.pdf), we restrict to loans which satisfy these conditions:
 
 -   Is a third party sale, short sale or charge off, REO disposition, or whole loan sale
 
