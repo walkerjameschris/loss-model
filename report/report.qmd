@@ -717,7 +717,7 @@ Many terms remained in the same position while many others moved one or less pos
 
 ## Performance
 
-In this section we compare the relative model performance of each model using three metrics. These metrics are aimed at measuring the applicability of each model for different use cases. Specifically, Gini and TMR are designed to measure rank ordering performance whereas RMSE is designed to measure accuracy. Gini is directly related to the receiver-operator-curve or ROC. While ROC is more common in data science, Gini is common in credit risk applications and takes the following form:
+In this section we compare the relative model performance of each model using three metrics. These metrics are aimed at measuring the applicability of each model for different use cases. Specifically, Gini is designed to measure rank ordering performance whereas RMSE is designed to measure accuracy. Gini is directly related to the receiver-operator-curve or ROC. While ROC is more common in data science, Gini is common in credit risk applications and takes the following form:
 
 $$
 \text{Gini}=2\times\text{ROC}-1
@@ -729,21 +729,9 @@ $$
 \text{RMSE}=\sqrt{\frac{1}{n}\sum{(\hat{y}_i-y_i})^2}
 $$
 
-Finially, tail-match-rate or TMR, like Gini, measures a model's ability to rank order. However, Gini measures rank ordering performance across the working range of our response variable. TMR measures the overlap between the highest 5% of actual loss values and 5% predicted values by asking the question "what percentage of the 5% highest loss values are within the 5% highest predicted values?" It takes the following form:
+In general we would like to maximize Gini to improve rank ordering while minimizing RMSE to reduce loss. However, in a credit decision setting we would prioritize rank ordering over accuracy. This is because most models are compared to some threshold which decides what is an acceptable amount of risk for an approved application. The specific threshold does not matter so long as those above the threshold are riskier than those below it as indicated by rank ordering performance.
 
-$$
-\text{TMR} = \frac{1}{n}\sum I(\hat{y}_i \geq \text{95th percentile of } \hat{y} \text{ and } y_i \geq \text{95th percentile of } y)
-$$
-
-Where *n* is:
-
-$$
-n=\sum{I(y_i \geq \text{95th percentile of }y)}
-$$
-
-In general we would like to maximize Gini and TMR to improve rank ordering while minimizing RMSE to reduce loss. However, in a credit decision setting we would prioritize rank ordering over accuracy. This is because most models are compared to some threshold which decides what is an acceptable amount of risk for an approved application. The specific threshold does not matter so long as those above the threshold are riskier than those below it as indicated by rank ordering performance.
-
-If we leverage Gini as our dominant metric then XGBoost provides the best overall performance. This is meaningful because Gini measures rank ordering performance across the range of the response variable. However, if we use TMR or RMSE the deep learning model estimated using `torch` is the best performer for both train and test. Both models perform better than linear regression (OLS) despite the introduction of splines in our linear model.
+If we leverage Gini as our dominant metric then XGBoost provides the best overall performance. This is meaningful because Gini measures rank ordering performance across the range of the response variable. However, if we use RMSE, the deep learning model estimated using `torch` is the best performer for both train and test. Both models perform better than linear regression (OLS) despite the introduction of splines in our linear model.
 
 ```{r}
 performance |>
@@ -751,7 +739,6 @@ performance |>
     population = make_nicenames(population),
     model = make_nicenames(model),
     gini = round(gini, 3),
-    tmr = scales::label_percent(0.1)(tmr),
     rmse = round(rmse)
   ) |>
   dplyr::rename_with(make_nicenames) |>

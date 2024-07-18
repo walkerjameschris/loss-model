@@ -45,23 +45,19 @@ if tune:
   hide_log = []
   drop_log = []
   active_log = []
-  tmr_log = []
 
   for n, d, a in product(num_hidden, dropout, active_fn):
 
     model = utils.fit_model(X_train, y_train, n, d, a)
-    tmr = utils.get_tmr(model(X_train), y_train)
 
     hide_log.append(n)
     drop_log.append(d)
     active_log.append(a)
-    tmr_log.append(tmr)
 
   pd.DataFrame({
     'n_hidden': hide_log,
     'dropout': drop_log,
-    'active_fn': active_log,
-    'tmr': tmr_log
+    'active_fn': active_log
   }).to_csv('data/tune_torch.csv', index=False)
 
 #### Fit and Save ####

@@ -34,18 +34,6 @@ def to_disk(x, y, label):
   })
   
   data.to_csv(label, index=False)
-  
-def get_tmr(pred, real):
-  '''Computes TMR over actuals and predicted'''
-
-  real = to_numpy(real)
-  pred = to_numpy(pred)
-  
-  real = real >= np.percentile(real, 95)
-  pred = pred >= np.percentile(pred, 95)
-  
-  # Compute match
-  return round(100 * sum(real * pred) / sum(real), 2)
 
 def load_data(x, y, prop=0.2):
   '''Sampling dataloader utility'''
@@ -103,9 +91,7 @@ def fit_model(X_train,
     loss = loss_fn(y_pred, y)
     
     if epoch % 500 == 0:
-      tmr = get_tmr(model(X_train), y_train)
-      epoch = str(epoch).zfill(len(str(n_epochs)))
-      print(f'Epoch: {epoch} TMR: {tmr}')
+      print(f'Epoch: {epoch}')
     
     optimizer.zero_grad()
     loss.backward()

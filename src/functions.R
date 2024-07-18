@@ -84,37 +84,7 @@ gini.data.frame <- function(data,
   )
 }
 
-tmr_vec <- function(truth, estimate, na_rm = TRUE, case_weights = NULL, ...) {
-  truth <- dplyr::percent_rank(truth) > 0.95
-  estimate <- dplyr::percent_rank(estimate) > 0.95
-  sum(truth * estimate) / sum(truth)
-}
-
-tmr <-
-  yardstick::new_numeric_metric(
-    fn = \(data, ...) UseMethod("tmr"),
-    direction = "maximize"
-  )
-
-tmr.data.frame <- function(data,
-                           truth,
-                           estimate,
-                           na_rm = TRUE,
-                           case_weights = NULL,
-                           ...) {
-  
-  yardstick::numeric_metric_summarizer(
-    name = "tmr",
-    fn = tmr_vec,
-    data = data,
-    truth = {{ truth }},
-    estimate = {{ estimate }},
-    na_rm = na_rm,
-    case_weights = {{ case_weights }}
-  )
-}
-
-metric_bundle <- yardstick::metric_set(gini, tmr, yardstick::rmse)
+metric_bundle <- yardstick::metric_set(gini, yardstick::rmse)
 
 get_performance <- function(data,
                             pred = .pred,
@@ -244,7 +214,6 @@ make_nicenames <- function(x) {
     
     # Performance columns
     "gini" ~ "Gini",
-    "tmr" ~ "TMR",
     "rmse" ~ "RMSE",
     "population" ~ "Subset",
     "model" ~ "Model",

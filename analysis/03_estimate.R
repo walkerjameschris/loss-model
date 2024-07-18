@@ -252,8 +252,7 @@ tibble::lst(
   dplyr::relocate(
     population,
     model,
-    gini,
-    tmr
+    gini
   ) |>
   dplyr::arrange(
     population != "train",
